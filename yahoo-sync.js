@@ -60,13 +60,10 @@
       cur = num(st.querySelector('option[selected]')?.textContent) || 1;
     }
 
-    const players = {}, weeks = {};
+    const players = {}, weeks = {}, errors = [];
     for (let w = 1; w <= cur; w++) {
       say(`W${w} / ${cur} 주차 로스터·매치업 읽는 중…`);
-      const [st, mu] = await Promise.all([
-        get(`${base}/starters?week=${w}&startertab=team`),
-        get(`${base}?matchup_week=${w}&module=matchups&lhst=matchups`),
-      ]);
+      const st = await get(`${base}/starters?week=${w}&startertab=team`);
       const lineups = {};
       for (const table of st.querySelectorAll('table[id^="Tst-team-"]')) {
         const tid = table.id.split('-').pop();
@@ -85,12 +82,16 @@
         lineups[tid] = lu;
       }
 
-      let lis = [...mu.querySelectorAll('li[data-target*="matchup?week="]')];
-      if (!lis.some(li => li.dataset.target.includes(`week=${w}&`))) {
-        const full = await get(`${base}?matchup_week=${w}`);
-        lis = [...full.querySelectorAll('li[data-target*="matchup?week="]')];
+      // 매치업은 여러 주소를 차례로 시도하고, 모두 실패해도 로스터는 살린다
+      let lis = [];
+      for (const u of [`${base}?matchup_week=${w}&module=matchups&lhst=matchups`, `${base}?matchup_week=${w}`, `${base}?week=${w}`]) {
+        try {
+          const doc = await get(u);
+          lis = [...doc.querySelectorAll('li[data-target*="matchup?week="]')].filter(li => li.dataset.target.includes(`week=${w}&`));
+          if (lis.length) break;
+        } catch (e) { errors.push(`W${w} 매치업: ${e.message}`); }
       }
-      lis = lis.filter(li => li.dataset.target.includes(`week=${w}&`));
+      if (!lis.length) errors.push(`W${w} 매치업을 찾지 못했어요`);
       const matchups = lis.map(li => {
         const q = new URLSearchParams(li.dataset.target.split('?')[1]);
         const pts = [...li.querySelectorAll('.Fz-lg')].map(e => num(text(e)));
@@ -110,7 +111,7 @@
     for (const wk of Object.values(weeks)) for (const lu of Object.values(wk.lineups)) delete lu.slots;
 
     const out = {
-      source: 'yahoo-bookmarklet', updatedAt: new Date().toISOString(),
+      source: 'yahoo-bookmarklet', updatedAt: new Date().toISOString(), errors,
       league: { id: lid, name: leagueName, season, currentWeek: cur, numTeams: teams.length },
       players, teams, weeks,
     };
@@ -127,6 +128,7 @@
       `<b>rosters.json</b> 파일을 다운로드 폴더에 저장했어요.<br>` +
       `<span style="opacity:.7;font-size:12px">다운로드가 안 보이면 아래 ‘파일 다시 저장’을 누르세요.</span><br>` +
       `<button id="ffm-save" style="${btn}">파일 다시 저장</button><br><br>` +
+      (errors.length ? `<span style="color:#ffb74d;font-size:12px">일부 경고: ${errors.slice(0, 3).join(' / ').replace(/</g, '&lt;')}</span><br><br>` : '') +
       `다음 단계: <a href="${UPLOAD_URL}" target="_blank" style="color:#b388ff;font-weight:700">GitHub에 올리기 ↗</a><br>` +
       `<span style="opacity:.7;font-size:12px">열린 페이지에 rosters.json 을 끌어다 놓고 아래 초록색 ‘Commit changes’</span><br><br>` +
       `<button id="ffm-close" style="${btn}">닫기</button>`);
