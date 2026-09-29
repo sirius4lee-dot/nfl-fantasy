@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   update:
+    # setup_yahoo.py 로 연동하기 전에는 건너뜀
+    if: ${{ vars.YAHOO_LEAGUE_ID != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
