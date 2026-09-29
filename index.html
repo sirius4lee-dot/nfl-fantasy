@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFL 판타지 기록장</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667080; --line: #e3e6ea;
+  --accent: #6001d2; --accent-soft: #efe6fb; --good: #0a7d3b; --bad: #c62828;
+  --hi1: #e6f4ea; --hi2: #c9e9d3; --hi3: #9fd8b1; --star: #f5a300; --mine: #fff8e1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #1a1e24; --text: #e7eaee; --muted: #9aa3ae; --line: #2c323a;
+    --accent: #b388ff; --accent-soft: #2a2140; --good: #5fd08a; --bad: #ff7a7a;
+    --hi1: #16301f; --hi2: #1e4a2d; --hi3: #27663c; --star: #ffc233; --mine: #2b2716;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #1a1e24; --text: #e7eaee; --muted: #9aa3ae; --line: #2c323a;
+  --accent: #b388ff; --accent-soft: #2a2140; --good: #5fd08a; --bad: #ff7a7a;
+  --hi1: #16301f; --hi2: #1e4a2d; --hi3: #27663c; --star: #ffc233; --mine: #2b2716;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+h1 { font-size: 18px; margin: 0 auto 0 0; }
+h1 small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+main { padding: 12px 16px 40px; max-width: 1600px; margin: 0 auto; }
+select, input, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .6; cursor: default; }
+label.inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.status { color: var(--muted); font-size: 12px; width: 100%; }
+.status.err { color: var(--bad); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; color: var(--muted); font-weight: 600; }
+.tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips button { padding: 4px 10px; border-radius: 999px; font-size: 13px; }
+.chips button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#search { min-width: 180px; flex: 1 1 180px; max-width: 280px; }
+.count { color: var(--muted); font-size: 12px; margin-left: auto; }
+.tablewrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
+th { position: sticky; top: 0; background: var(--panel); z-index: 2; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+th.sorted { color: var(--accent); }
+th:nth-child(-n+3), td:nth-child(-n+3) { text-align: left; }
+th.stick, td.stick { position: sticky; left: 0; background: var(--panel); z-index: 1; }
+th.stick { z-index: 3; }
+tr.mine td { background: var(--mine); }
+tr.total td { font-weight: 700; background: var(--accent-soft); }
+td.pts { min-width: 48px; }
+table td.h1 { background: var(--hi1); } table td.h2 { background: var(--hi2); } table td.h3 { background: var(--hi3); font-weight: 600; }
+td.neg { color: var(--bad); }
+td.none { color: var(--muted); }
+td.tot { font-weight: 700; }
+.star { border: none; background: none; padding: 0 4px 0 0; font-size: 16px; color: var(--muted); line-height: 1; }
+.star.on { color: var(--star); }
+.pname { cursor: pointer; font-weight: 600; }
+.pname:hover { text-decoration: underline; }
+.pos { display: inline-block; min-width: 30px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.inj { font-size: 10px; font-weight: 700; color: var(--bad); margin-left: 4px; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 0; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+.dlg-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+.dlg-head h2 { font-size: 16px; margin: 0 auto 0 0; }
+.dlg-body { padding: 12px 16px 16px; }
+.dlg-body table td:last-child { font-weight: 700; }
+.dlg-body td.line { text-align: left; white-space: normal; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 16px; }
+.grid label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.grid input { width: 72px; text-align: right; padding: 4px 6px; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px 12px; }
+legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px; }
+.note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+@media (max-width: 640px) {
+  h1 { width: 100%; }
+  .tablewrap { max-height: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 NFL 판타지 기록장 <small>주차별 Fan Pts</small></h1>
+  <label class="inline">시즌 <select id="season"></select></label>
+  <label class="inline">점수 <select id="preset">
+    <option value="half">Half PPR (Yahoo 기본)</option>
+    <option value="ppr">Full PPR</option>
+    <option value="std">Standard</option>
+    <option value="custom">커스텀</option>
+  </select></label>
+  <button id="btnRules">점수 규칙</button>
+  <button id="btnCsv">CSV 내보내기</button>
+  <button id="btnUpdate" class="primary">업데이트</button>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button data-tab="all" class="on">전체 선수</button>
+    <button data-tab="mine">내 팀 (<span id="myCount">0</span>)</button>
+  </div>
+  <div class="filters">
+    <div class="chips" id="posChips"></div>
+    <select id="team"><option value="">전체 팀</option></select>
+    <input id="search" type="search" placeholder="선수 이름 검색">
+    <span class="count" id="count"></span>
+  </div>
+  <div class="tablewrap"><table id="grid"></table></div>
+</main>
+
+<dialog id="dlgPlayer">
+  <div class="dlg-head"><h2 id="pTitle"></h2><button id="pStar"></button><button data-close>닫기</button></div>
+  <div class="dlg-body" id="pBody"></div>
+</dialog>
+
+<dialog id="dlgRules">
+  <div class="dlg-head"><h2>점수 규칙</h2><button id="rulesReset">Yahoo 기본값</button><button data-close>닫기</button></div>
+  <div class="dlg-body">
+    <div id="rulesForm"></div>
+    <p class="note">리그 규칙은 Yahoo 리그 페이지 &gt; League &gt; Settings 의 Scoring 항목에서 확인할 수 있어요. 값을 바꾸면 바로 다시 계산되고 &lsquo;커스텀&rsquo;으로 저장돼요.</p>
+  </div>
+</dialog>
+
+<script>
+(() => {
+'use strict';
+
+const API_STATE = 'https://api.sleeper.app/v1/state/nfl';
+const API_STATS = (season, wk) => `https://api.sleeper.com/stats/nfl/${season}/${wk}?season_type=regular` +
+  ['QB','RB','WR','TE','K','DEF'].map(p => `&position[]=${p}`).join('');
+const MAX_WEEKS = 18;
+const POSITIONS = ['ALL','QB','RB','WR','TE','FLEX','K','DEF'];
+const KEEP = ['gp','pass_att','pass_cmp','pass_yd','pass_td','pass_int','pass_2pt','rush_att','rush_yd','rush_td','rush_2pt',
+  'rec_tgt','rec','rec_yd','rec_td','rec_2pt','st_td','fum_lost','fgm','fga','fgm_40_49','fgm_50p','fgm_50_59','fgm_60p',
+  'fgmiss','xpm','xpa','xpmiss','sack','int','fum_rec','def_td','def_st_td','safe','blk_kick','pts_allow','yds_allow'];
+
+// Yahoo 공개 리그 기본 점수 규칙 (Half PPR)
+const YAHOO_DEFAULT = {
+  pass_yd: 0.04, pass_td: 4, pass_int: -1, pass_2pt: 2,
+  rush_yd: 0.1, rush_td: 6, rush_2pt: 2,
+  rec: 0.5, rec_yd: 0.1, rec_td: 6, rec_2pt: 2,
+  st_td: 6, fum_lost: -2,
+  fg_0_39: 3, fg_40_49: 4, fg_50p: 5, xpm: 1, fgmiss: 0, xpmiss: 0,
+  def_sack: 1, def_int: 2, def_fum_rec: 2, def_td: 6, def_safe: 2, def_blk_kick: 2,
+  pa_0: 10, pa_1_6: 7, pa_7_13: 4, pa_14_20: 1, pa_21_27: 0, pa_28_34: -1, pa_35p: -4,
+};
+const PRESETS = { half: { rec: 0.5 }, ppr: { rec: 1 }, std: { rec: 0 } };
+const RULE_GROUPS = [
+  ['패스', [['pass_yd','패스 1야드'],['pass_td','패스 TD'],['pass_int','인터셉트'],['pass_2pt','패스 2점']]],
+  ['러시 / 리시브', [['rush_yd','러시 1야드'],['rush_td','러시 TD'],['rush_2pt','러시 2점'],['rec','리셉션'],['rec_yd','리시브 1야드'],['rec_td','리시브 TD'],['rec_2pt','리시브 2점']]],
+  ['기타', [['st_td','리턴 TD'],['fum_lost','펌블 로스트']]],
+  ['키커', [['fg_0_39','FG 0-39야드'],['fg_40_49','FG 40-49야드'],['fg_50p','FG 50+야드'],['xpm','PAT 성공'],['fgmiss','FG 실패'],['xpmiss','PAT 실패']]],
+  ['수비 / 스페셜팀', [['def_sack','색'],['def_int','인터셉트'],['def_fum_rec','펌블 리커버리'],['def_td','수비·ST TD'],['def_safe','세이프티'],['def_blk_kick','킥 블록']]],
+  ['실점 구간', [['pa_0','0점'],['pa_1_6','1-6점'],['pa_7_13','7-13점'],['pa_14_20','14-20점'],['pa_21_27','21-27점'],['pa_28_34','28-34점'],['pa_35p','35점+']]],
+];
+
+// ---------- storage (optional; page works without it) ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('ffm.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('ffm.' + k, JSON.stringify(v)); return true; } catch { return false; } },
+};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => n == null ? '-' : (Math.round(n * 100) / 100).toFixed(2);
+
+const state = {
+  season: null, currentSeason: null, currentWeek: null,
+  data: null,              // { fetchedAt, weeks: {wk: {pid: stats}}, players: {pid: {n,p,t,inj}} }
+  preset: store.get('preset', 'half'),
+  rules: { ...YAHOO_DEFAULT, ...store.get('rules', {}) },
+  myTeam: new Set(store.get('myTeam', [])),
+  tab: 'all', pos: 'ALL', team: '', q: '',
+  sort: { key: 'total', dir: -1 },
+};
+
+// ---------- scoring ----------
+function calcPts(s, pos, r) {
+  const v = k => s[k] || 0;
+  if (pos === 'DEF') {
+    let p = v('sack') * r.def_sack + v('int') * r.def_int + v('fum_rec') * r.def_fum_rec +
+      (v('def_td') + v('def_st_td')) * r.def_td + v('safe') * r.def_safe + v('blk_kick') * r.def_blk_kick;
+    if (s.gp) {
+      const pa = v('pts_allow');
+      p += pa === 0 ? r.pa_0 : pa <= 6 ? r.pa_1_6 : pa <= 13 ? r.pa_7_13 : pa <= 20 ? r.pa_14_20 :
+           pa <= 27 ? r.pa_21_27 : pa <= 34 ? r.pa_28_34 : r.pa_35p;
+    }
+    return p;
+  }
+  const fg50 = s.fgm_50p != null ? s.fgm_50p : v('fgm_50_59') + v('fgm_60p');
+  const fg40 = v('fgm_40_49');
+  const fgShort = Math.max(0, v('fgm') - fg40 - fg50);
+  return v('pass_yd') * r.pass_yd + v('pass_td') * r.pass_td + v('pass_int') * r.pass_int + v('pass_2pt') * r.pass_2pt +
+    v('rush_yd') * r.rush_yd + v('rush_td') * r.rush_td + v('rush_2pt') * r.rush_2pt +
+    v('rec') * r.rec + v('rec_yd') * r.rec_yd + v('rec_td') * r.rec_td + v('rec_2pt') * r.rec_2pt +
+    v('st_td') * r.st_td + v('fum_lost') * r.fum_lost +
+    fgShort * r.fg_0_39 + fg40 * r.fg_40_49 + fg50 * r.fg_50p + v('xpm') * r.xpm +
+    v('fgmiss') * r.fgmiss + v('xpmiss') * r.xpmiss;
+}
+
+function statLine(s, pos) {
+  const v = k => s[k] || 0, parts = [];
+  if (pos === 'DEF') {
+    parts.push(`실점 ${v('pts_allow')}`, `허용 ${v('yds_allow')}yd`, `색 ${v('sack')}`, `INT ${v('int')}`, `FR ${v('fum_rec')}`);
+    const td = v('def_td') + v('def_st_td'); if (td) parts.push(`TD ${td}`);
+    if (v('safe')) parts.push(`세이프티 ${v('safe')}`);
+    return parts.join(' · ');
+  }
+  if (pos === 'K') {
+    const fg50 = s.fgm_50p != null ? s.fgm_50p : v('fgm_50_59') + v('fgm_60p');
+    return `FG ${v('fgm')}/${v('fga')} (40-49: ${v('fgm_40_49')}, 50+: ${fg50}) · PAT ${v('xpm')}/${v('xpa')}`;
+  }
+  if (v('pass_att')) parts.push(`패스 ${v('pass_cmp')}/${v('pass_att')} ${v('pass_yd')}yd ${v('pass_td')}TD ${v('pass_int')}INT`);
+  if (v('rush_att')) parts.push(`러시 ${v('rush_att')}회 ${v('rush_yd')}yd${v('rush_td') ? ' ' + v('rush_td') + 'TD' : ''}`);
+  if (v('rec_tgt') || v('rec')) parts.push(`리시브 ${v('rec')}/${v('rec_tgt')} ${v('rec_yd')}yd${v('rec_td') ? ' ' + v('rec_td') + 'TD' : ''}`);
+  if (v('fum_lost')) parts.push(`펌블로스트 ${v('fum_lost')}`);
+  if (v('st_td')) parts.push(`리턴TD ${v('st_td')}`);
+  return parts.join(' · ') || '기록 없음';
+}
+
+// ---------- data ----------
+function setStatus(msg, err) { const el = $('#status'); el.textContent = msg; el.className = 'status' + (err ? ' err' : ''); }
+
+async function getJSON(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function loadNflState() {
+  try {
+    const s = await getJSON(API_STATE);
+    state.currentSeason = +s.season;
+    state.currentWeek = s.season_type === 'regular' ? +s.week : (s.season_type === 'pre' ? 0 : MAX_WEEKS);
+  } catch {
+    const now = new Date();
+    state.currentSeason = now.getMonth() < 2 ? now.getFullYear() - 1 : now.getFullYear();
+    state.currentWeek = MAX_WEEKS;
+  }
+}
+
+async function update() {
+  const btn = $('#btnUpdate'); btn.disabled = true;
+  const season = state.season;
+  const lastWeek = season === state.currentSeason ? Math.min(Math.max(state.currentWeek, 1), MAX_WEEKS) : MAX_WEEKS;
+  const weeks = {}, players = {};
+  let done = 0;
+  setStatus(`${season} 시즌 1~${lastWeek}주차 불러오는 중…`);
+  try {
+    const wkList = Array.from({ length: lastWeek }, (_, i) => i + 1);
+    const results = await Promise.all(wkList.map(async wk => {
+      const rows = await getJSON(API_STATS(season, wk));
+      setStatus(`${season} 시즌 불러오는 중… (${++done}/${lastWeek})`);
+      return [wk, rows];
+    }));
+    for (const [wk, rows] of results) {
+      if (!Array.isArray(rows) || !rows.length) continue;
+      const w = {};
+      for (const r of rows) {
+        const st = r.stats || {}, p = r.player || {};
+        if (!st.gp && !st.gms_active) continue;
+        const o = {};
+        for (const k of KEEP) if (st[k] != null && st[k] !== 0) o[k] = st[k];
+        if (st.gp) o.gp = 1;
+        o.opp = r.opponent || '';
+        w[r.player_id] = o;
+        const name = p.position === 'DEF' ? `${p.first_name} ${p.last_name}` : `${p.first_name || ''} ${p.last_name || ''}`.trim();
+        // later weeks overwrite earlier ones -> latest team / injury
+        players[r.player_id] = { n: name, p: p.position, t: r.team || p.team || '', inj: p.injury_status || '' };
+      }
+      if (Object.keys(w).length) weeks[wk] = w;
+    }
+    const data = { fetchedAt: Date.now(), weeks, players };
+    const saved = store.set('cache.' + season, data);
+    if (state.season !== season) return; // user switched season meanwhile
+    state.data = data;
+    const nW = Object.keys(weeks).length;
+    setStatus(`${season} 시즌 ${nW}개 주차 업데이트 완료 · ${new Date().toLocaleString('ko-KR')}` + (saved ? '' : ' (브라우저 저장 공간 부족으로 캐시는 저장 안 됨)'));
+    buildTeamOptions(); render();
+  } catch (e) {
+    setStatus(`업데이트 실패: ${e.message}. 인터넷 연결을 확인하고 다시 시도해 주세요.`, true);
+  } finally { btn.disabled = false; }
+}
+
+// ---------- rows ----------
+function weekNums() { return state.data ? Object.keys(state.data.weeks).map(Number).sort((a, b) => a - b) : []; }
+
+function buildRows() {
+  const d = state.data; if (!d) return [];
+  const wks = weekNums(), r = state.rules, rows = [];
+  for (const [pid, p] of Object.entries(d.players)) {
+    const pts = {}; let total = 0, gp = 0;
+    for (const wk of wks) {
+      const s = d.weeks[wk][pid];
+      if (s && s.gp) { const v = calcPts(s, p.p, r); pts[wk] = v; total += v; gp++; }
+    }
+    rows.push({ pid, ...p, pts, total, gp, avg: gp ? total / gp : 0 });
+  }
+  return rows;
+}
+
+function filterRows(rows) {
+  const q = state.q.trim().toLowerCase();
+  return rows.filter(x => {
+    if (state.tab === 'mine' && !state.myTeam.has(x.pid)) return false;
+    if (state.tab === 'all' && !x.gp) return false;
+    if (state.pos === 'FLEX' ? !['RB','WR','TE'].includes(x.p) : state.pos !== 'ALL' && x.p !== state.pos) return false;
+    if (state.team && x.t !== state.team) return false;
+    if (q && !x.n.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function sortRows(rows) {
+  const { key, dir } = state.sort;
+  const val = x => key.startsWith('w') ? (x.pts[key.slice(1)] ?? -1e9) : x[key];
+  return rows.sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (typeof va === 'string') return dir * va.localeCompare(vb);
+    return dir * (va - vb) || b.total - a.total;
+  });
+}
+
+// ---------- render ----------
+function heat(v) { return v >= 25 ? 'h3' : v >= 18 ? 'h2' : v >= 12 ? 'h1' : v < 0 ? 'neg' : ''; }
+
+function render() {
+  $('#myCount').textContent = state.myTeam.size;
+  const table = $('#grid');
+  if (!state.data) { table.innerHTML = `<tr><td class="empty">‘업데이트’를 눌러 데이터를 불러오세요.</td></tr>`; $('#count').textContent = ''; return; }
+  const wks = weekNums();
+  const rows = sortRows(filterRows(buildRows()));
+  const cols = [['rank','#'],['n','선수'],['t','팀'], ...wks.map(w => ['w' + w, `W${w}`]), ['total','합계'],['avg','평균'],['gp','경기']];
+  const s = state.sort;
+  let html = '<thead><tr>' + cols.map(([k, l], i) =>
+    `<th data-sort="${k}" class="${i === 1 ? 'stick ' : ''}${s.key === k ? 'sorted' : ''}">${l}${s.key === k ? (s.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('') + '</tr></thead><tbody>';
+  if (!rows.length) {
+    html += `<tr><td colspan="${cols.length}" class="empty">${state.tab === 'mine' ? '내 팀에 선수가 없어요. 전체 선수 목록에서 ☆를 눌러 추가하세요.' : '조건에 맞는 선수가 없어요.'}</td></tr>`;
+  }
+  rows.forEach((x, i) => {
+    const mine = state.myTeam.has(x.pid);
+    html += `<tr class="${mine && state.tab === 'all' ? 'mine' : ''}">` +
+      `<td>${i + 1}</td>` +
+      `<td class="stick"><button class="star ${mine ? 'on' : ''}" data-star="${x.pid}" title="내 팀 추가/제거">${mine ? '★' : '☆'}</button>` +
+      `<span class="pos">${x.p}</span><span class="pname" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
+      `<td>${x.t}</td>` +
+      wks.map(w => {
+        const v = x.pts[w];
+        if (v == null) {
+          const played = state.data.weeks[w][x.pid];
+          return `<td class="pts none">${played ? '-' : ''}</td>`;
+        }
+        return `<td class="pts ${heat(v)}">${fmt(v)}</td>`;
+      }).join('') +
+      `<td class="tot">${fmt(x.total)}</td><td>${fmt(x.avg)}</td><td>${x.gp}</td></tr>`;
+  });
+  if (state.tab === 'mine' && rows.length) {
+    const sum = w => rows.reduce((a, x) => a + (x.pts[w] || 0), 0);
+    const tot = rows.reduce((a, x) => a + x.total, 0);
+    html += `<tr class="total"><td></td><td class="stick">팀 합계</td><td></td>${wks.map(w => `<td>${fmt(sum(w))}</td>`).join('')}<td>${fmt(tot)}</td><td>${wks.length ? fmt(tot / wks.length) : '-'}</td><td></td></tr>`;
+  }
+  table.innerHTML = html + '</tbody>';
+  $('#count').textContent = `${rows.length}명`;
+}
+
+function buildTeamOptions() {
+  const sel = $('#team'), cur = sel.value;
+  const teams = state.data ? [...new Set(Object.values(state.data.players).map(p => p.t).filter(Boolean))].sort() : [];
+  sel.innerHTML = '<option value="">전체 팀</option>' + teams.map(t => `<option ${t === cur ? 'selected' : ''}>${t}</option>`).join('');
+  if (!teams.includes(cur)) state.team = '';
+}
+
+function openPlayer(pid) {
+  const p = state.data.players[pid]; if (!p) return;
+  const wks = weekNums();
+  $('#pTitle').innerHTML = `${esc(p.n)} <span class="pos">${p.p} · ${p.t}</span>${p.inj ? `<span class="inj">${esc(p.inj)}</span>` : ''}`;
+  const starBtn = $('#pStar');
+  const syncStar = () => { starBtn.textContent = state.myTeam.has(pid) ? '★ 내 팀에서 빼기' : '☆ 내 팀에 추가'; };
+  syncStar();
+  starBtn.onclick = () => { toggleMine(pid); syncStar(); };
+  let total = 0, gp = 0;
+  const body = wks.map(w => {
+    const s = state.data.weeks[w][pid];
+    if (!s) return `<tr><td>W${w}</td><td></td><td class="line">경기 없음 (바이 또는 결장)</td><td>-</td></tr>`;
+    const v = s.gp ? calcPts(s, p.p, state.rules) : null;
+    if (v != null) { total += v; gp++; }
+    return `<tr><td>W${w}</td><td>${s.opp ? 'vs ' + s.opp : ''}</td><td class="line">${s.gp ? statLine(s, p.p) : '출전 기록 없음'}</td><td>${fmt(v)}</td></tr>`;
+  }).join('');
+  $('#pBody').innerHTML = `<table><thead><tr><th>주차</th><th>상대</th><th>기록</th><th>Fan Pts</th></tr></thead><tbody>${body}` +
+    `<tr class="total"><td>합계</td><td></td><td class="line">${gp}경기 · 평균 ${gp ? fmt(total / gp) : '-'}</td><td>${fmt(total)}</td></tr></tbody></table>`;
+  $('#dlgPlayer').showModal();
+}
+
+function toggleMine(pid) {
+  state.myTeam.has(pid) ? state.myTeam.delete(pid) : state.myTeam.add(pid);
+  store.set('myTeam', [...state.myTeam]);
+  render();
+}
+
+// ---------- rules ----------
+function applyPreset(name) {
+  state.preset = name;
+  if (PRESETS[name]) state.rules = { ...YAHOO_DEFAULT, ...PRESETS[name] };
+  store.set('preset', name); store.set('rules', state.rules);
+  $('#preset').value = name;
+  buildRulesForm(); render();
+}
+
+function buildRulesForm() {
+  $('#rulesForm').innerHTML = RULE_GROUPS.map(([title, items]) =>
+    `<fieldset><legend>${title}</legend><div class="grid">${items.map(([k, l]) =>
+      `<label>${l}<input type="number" step="0.01" data-rule="${k}" value="${state.rules[k]}"></label>`).join('')}</div></fieldset>`).join('');
+}
+
+// ---------- CSV ----------
+function exportCsv() {
+  if (!state.data) return;
+  const wks = weekNums();
+  const rows = sortRows(filterRows(buildRows()));
+  const head = ['Player','Pos','Team', ...wks.map(w => 'W' + w), 'Total','Avg','GP'];
+  const lines = [head, ...rows.map(x => [x.n, x.p, x.t, ...wks.map(w => x.pts[w] != null ? fmt(x.pts[w]) : ''), fmt(x.total), fmt(x.avg), x.gp])]
+    .map(r => r.map(c => /[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(','));
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `nfl_fantasy_${state.season}_${state.tab}.csv`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------- events ----------
+function selectSeason(season) {
+  state.season = season;
+  store.set('season', season);
+  state.data = store.get('cache.' + season, null);
+  buildTeamOptions(); render();
+  if (state.data) {
+    setStatus(`${season} 시즌 저장된 데이터 (${new Date(state.data.fetchedAt).toLocaleString('ko-KR')} 기준) · 최신 점수는 ‘업데이트’를 누르세요.`);
+    // current season: refresh automatically if cache is older than 1 hour
+    if (season === state.currentSeason && Date.now() - state.data.fetchedAt > 3600e3) update();
+  } else update();
+}
+
+function bind() {
+  $('#posChips').innerHTML = POSITIONS.map(p => `<button data-pos="${p}" class="${p === state.pos ? 'on' : ''}">${p === 'ALL' ? '전체' : p}</button>`).join('');
+  $('#posChips').addEventListener('click', e => {
+    const b = e.target.closest('[data-pos]'); if (!b) return;
+    state.pos = b.dataset.pos;
+    document.querySelectorAll('#posChips button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+  document.querySelector('.tabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-tab]'); if (!b) return;
+    state.tab = b.dataset.tab;
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+  $('#team').addEventListener('change', e => { state.team = e.target.value; render(); });
+  $('#search').addEventListener('input', e => { state.q = e.target.value; render(); });
+  $('#season').addEventListener('change', e => selectSeason(+e.target.value));
+  $('#preset').addEventListener('change', e => {
+    if (e.target.value === 'custom') { state.preset = 'custom'; store.set('preset', 'custom'); $('#dlgRules').showModal(); }
+    else applyPreset(e.target.value);
+  });
+  $('#btnUpdate').addEventListener('click', update);
+  $('#btnCsv').addEventListener('click', exportCsv);
+  $('#btnRules').addEventListener('click', () => $('#dlgRules').showModal());
+  $('#rulesReset').addEventListener('click', () => applyPreset('half'));
+  $('#rulesForm').addEventListener('input', e => {
+    const k = e.target.dataset.rule; if (!k) return;
+    const v = parseFloat(e.target.value);
+    if (Number.isNaN(v)) return;
+    state.rules[k] = v; state.preset = 'custom';
+    $('#preset').value = 'custom';
+    store.set('rules', state.rules); store.set('preset', 'custom');
+    render();
+  });
+  $('#grid').addEventListener('click', e => {
+    const th = e.target.closest('th[data-sort]');
+    if (th) {
+      const k = th.dataset.sort; if (k === 'rank') return;
+      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['n','t'].includes(k) ? 1 : -1 };
+      render(); return;
+    }
+    const star = e.target.closest('[data-star]');
+    if (star) { toggleMine(star.dataset.star); return; }
+    const name = e.target.closest('[data-pid]');
+    if (name) openPlayer(name.dataset.pid);
+  });
+  document.querySelectorAll('dialog [data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+  document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+}
+
+async function init() {
+  bind();
+  $('#preset').value = state.preset;
+  buildRulesForm();
+  render();
+  setStatus('NFL 시즌 정보 확인 중…');
+  await loadNflState();
+  const seasons = [];
+  for (let y = state.currentSeason; y >= state.currentSeason - 4; y--) seasons.push(y);
+  $('#season').innerHTML = seasons.map(y => `<option value="${y}">${y}</option>`).join('');
+  const saved = store.get('season', state.currentSeason);
+  const season = seasons.includes(saved) ? saved : state.currentSeason;
+  $('#season').value = season;
+  selectSeason(season);
+}
+
+init();
+})();
+</script>
+</body>
+</html>
