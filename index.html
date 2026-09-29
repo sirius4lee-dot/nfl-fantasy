@@ -81,6 +81,14 @@ legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px;
 .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
 .hide { display: none !important; }
 .helplink { color: var(--accent); font-size: 13px; }
+.memo { margin: 0 0 14px; }
+.memo-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 6px; font-weight: 700; font-size: 13px; }
+.memo-state { color: var(--muted); font-weight: 400; font-size: 12px; }
+.memo textarea { width: 100%; min-height: 96px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.pname.has-note::after { content: ' 📝'; font-size: 12px; }
+#syncQr img, #syncQr canvas { margin-top: 8px; background: #fff; padding: 8px; border-radius: 8px; }
+#dlgSync ol { padding-left: 20px; }
+#dlgSync input { width: 100%; max-width: 380px; }
 body.noleague .lg { display: none !important; }
 th.l, td.l { text-align: left; }
 .owner { font-size: 12px; color: var(--muted); }
@@ -116,6 +124,7 @@ td.loss { color: var(--muted); }
   </select></label>
   <button id="btnRules">점수 규칙</button>
   <button id="btnCsv">CSV 내보내기</button>
+  <button id="btnSync">메모 동기화</button>
   <button id="btnRoster" title="북마클릿 데이터를 파일로 저장해 둔 경우 이 기기에 바로 적용">로스터 파일</button>
   <a href="bookmarklet.html" class="helplink">로스터 가져오기 안내</a>
   <input id="rosterFile" type="file" accept=".json,application/json" hidden>
@@ -153,6 +162,30 @@ td.loss { color: var(--muted); }
 <dialog id="dlgPlayer">
   <div class="dlg-head"><h2 id="pTitle"></h2><button id="pStar"></button><button data-close>닫기</button></div>
   <div class="dlg-body" id="pBody"></div>
+</dialog>
+
+<dialog id="dlgSync">
+  <div class="dlg-head"><h2>메모 동기화</h2><button data-close>닫기</button></div>
+  <div class="dlg-body">
+    <p id="syncState" class="note"></p>
+    <div id="syncSetup">
+      <p>메모는 나만 볼 수 있는 비공개 저장소 <b>nfl-fantasy-notes</b>에 저장돼서 PC·폰 어디서나 같이 보여요. 메모 전용 GitHub 토큰을 한 번 만들어 주세요.</p>
+      <ol class="note">
+        <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank">GitHub 토큰 만들기 ↗</a></li>
+        <li>Token name <b>nfl-notes</b> · Expiration <b>366 days</b></li>
+        <li>Repository access → <b>Only select repositories</b> → <b>nfl-fantasy-notes</b></li>
+        <li>Permissions → Repository permissions → <b>Contents: Read and write</b> → <b>Generate token</b></li>
+        <li>나온 github_pat_… 를 아래에 붙여넣고 <b>연결</b></li>
+      </ol>
+      <p><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off"> <button id="syncSave" class="primary">연결</button></p>
+    </div>
+    <div id="syncOn" hidden>
+      <p><b>휴대폰 연결:</b> 폰 카메라로 아래 QR을 찍어 열면 폰에서도 바로 동기화돼요.</p>
+      <div id="syncQr"></div>
+      <p class="note">QR 안에 토큰이 들어 있으니 다른 사람에게 보여주지 마세요.</p>
+      <button id="syncOff">이 기기 연결 해제</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="dlgRules">
@@ -529,7 +562,7 @@ function renderRoster() {
       if (role === 'start' && v != null) started += v;
       return `<td class="pts ${role === 'start' && v != null ? heat(v) : role}">${v == null ? (role === 'off' ? '' : '-') : fmt(v)}</td>`;
     }).join('');
-    const name = info ? `<span class="pname" data-pid="${p.sid}">${esc(info.n)}</span>` : esc(p.name);
+    const name = info ? `<span class="pname${hasNote(p.sid) ? ' has-note' : ''}" data-pid="${p.sid}">${esc(info.n)}</span>` : esc(p.name);
     html += `<tr><td class="owner">${esc(p.slot)}</td><td class="stick"><span class="pos">${esc(p.pos)}</span>${name}${info?.inj ? `<span class="inj">${esc(info.inj)}</span>` : ''}</td>` +
       `<td>${esc(info?.t || p.nfl)}</td>${cells}<td class="tot">${fmt(started)}</td></tr>`;
   }
@@ -558,7 +591,7 @@ function renderPlayers() {
     html += `<tr class="${(mine && state.tab === 'all') || myOwn ? 'mine' : ''}">` +
       `<td>${i + 1}</td>` +
       `<td class="stick"><button class="star ${mine ? 'on' : ''}" data-star="${x.pid}" title="관심 선수 추가/제거">${mine ? '★' : '☆'}</button>` +
-      `<span class="pos">${x.p}</span><span class="pname" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
+      `<span class="pos">${x.p}</span><span class="pname${hasNote(x.pid) ? ' has-note' : ''}" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
       `<td>${x.t}</td>` +
       (lg ? `<td class="l owner ${myOwn ? 'me' : ''}">${x.o ? esc(x.on) : 'FA'}</td>` : '') +
       wks.map(w => {
@@ -587,6 +620,133 @@ function buildTeamOptions() {
   if (!teams.includes(cur)) state.team = '';
 }
 
+// ---------- 선수 메모 (비공개 저장소 동기화) ----------
+const NOTES_API = 'https://api.github.com/repos/sirius4lee-dot/nfl-fantasy-notes/contents/notes.json';
+const SITE_URL = 'https://sirius4lee-dot.github.io/nfl-fantasy/';
+// map: { [선수id]: { t: 메모, u: 수정 시각(ms), n: 이름 } } — 지운 메모도 t:'' 로 남겨 삭제가 동기화되게 함
+const notes = { map: store.get('notes', {}), token: store.get('notesToken', ''), sha: null, dirty: store.get('notesDirty', false), timer: null, busy: null, msg: '' };
+const hasNote = sid => !!notes.map[sid]?.t;
+
+function b64encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+const b64decode = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+
+function notesStatus(msg) {
+  notes.msg = msg;
+  const el = $('#memoState'); if (el) el.textContent = msg;
+  $('#btnSync').textContent = notes.token ? '메모 동기화 ✓' : '메모 동기화';
+  const ss = $('#syncState'); if (ss) ss.textContent = notes.token ? `연결됨 · ${msg}` : '이 기기는 아직 연결되지 않았어요. 메모는 이 기기에만 저장돼요.';
+}
+
+async function ghNotes(method, body) {
+  const r = await fetch(NOTES_API, {
+    method, cache: 'no-store',
+    headers: { Authorization: `Bearer ${notes.token}`, Accept: 'application/vnd.github+json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) throw new Error('토큰이 만료됐거나 잘못됐어요');
+  if (r.status === 404 || r.status === 403) throw new Error('토큰에 nfl-fantasy-notes 권한이 없어요');
+  return r;
+}
+
+function mergeNotes(remote) {
+  let localNewer = false;
+  const out = { ...remote };
+  for (const [k, v] of Object.entries(notes.map)) {
+    if (!out[k] || v.u > out[k].u) { out[k] = v; if (!remote[k] || v.u > remote[k].u) localNewer = true; }
+  }
+  notes.map = out; store.set('notes', out);
+  return localNewer;
+}
+
+async function notesPull() {
+  if (!notes.token) return;
+  const r = await ghNotes('GET');
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  notes.sha = j.sha;
+  let remote = {};
+  try { remote = JSON.parse(b64decode(j.content || '')) || {}; } catch { remote = {}; }
+  return mergeNotes(remote);
+}
+
+async function notesPush(retry = true) {
+  const r = await ghNotes('PUT', { message: '메모 업데이트', content: b64encode(JSON.stringify(notes.map, null, 1)), sha: notes.sha || undefined });
+  if (r.status === 409 || r.status === 422) { // 다른 기기가 먼저 저장함 -> 합친 뒤 다시
+    if (!retry) throw new Error('다른 기기와 충돌이 났어요');
+    await notesPull(); return notesPush(false);
+  }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  notes.sha = (await r.json()).content.sha;
+  notes.dirty = false; store.set('notesDirty', false);
+}
+
+// 여러 요청이 겹치지 않게 순서대로 실행
+function notesSync(push) {
+  if (!notes.token) { notesStatus(notes.dirty ? '이 기기에 저장됨 (동기화 미연결)' : ''); return Promise.resolve(); }
+  const run = async () => {
+    notesStatus('동기화 중…');
+    try {
+      const localNewer = await notesPull();
+      if (push || localNewer || notes.dirty) await notesPush();
+      notesStatus('동기화됨 ✓');
+      render();
+    } catch (e) { notesStatus('동기화 실패: ' + e.message); }
+  };
+  notes.busy = (notes.busy || Promise.resolve()).then(run);
+  return notes.busy;
+}
+
+function setNote(sid, text, name) {
+  notes.map[sid] = { t: text.trim() ? text : '', u: Date.now(), n: name };
+  store.set('notes', notes.map);
+  notes.dirty = true; store.set('notesDirty', true);
+  notesStatus(notes.token ? '입력 중…' : '이 기기에 저장됨 (동기화 미연결)');
+  clearTimeout(notes.timer);
+  notes.timer = setTimeout(() => notesSync(true), 1500);
+}
+
+function flushNotes() {
+  if (notes.timer) { clearTimeout(notes.timer); notes.timer = null; notesSync(true); }
+}
+
+async function connectNotes(token) {
+  notes.token = token;
+  try {
+    notesStatus('연결 확인 중…');
+    await notesPull();
+    store.set('notesToken', token);
+    await notesSync(notes.dirty);
+    return true;
+  } catch (e) {
+    notes.token = ''; notesStatus('연결 실패: ' + e.message);
+    return false;
+  }
+}
+
+function showSyncDialog() {
+  const on = !!notes.token;
+  $('#syncSetup').hidden = on;
+  $('#syncOn').hidden = !on;
+  notesStatus(notes.msg || (on ? '연결됨' : ''));
+  if (on) {
+    const box = $('#syncQr'); box.innerHTML = '';
+    const draw = () => new window.QRCode(box, { text: `${SITE_URL}#token=${notes.token}`, width: 200, height: 200 });
+    if (window.QRCode) draw();
+    else {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      sc.onload = draw; sc.onerror = () => { box.textContent = 'QR을 불러오지 못했어요.'; };
+      document.head.appendChild(sc);
+    }
+  }
+  $('#dlgSync').showModal();
+}
+
 function openPlayer(pid) {
   const p = state.data.players[pid]; if (!p) return;
   const wks = weekNums();
@@ -604,8 +764,12 @@ function openPlayer(pid) {
     if (v != null) { total += v; gp++; }
     return `<tr><td>W${w}</td><td>${s.opp ? 'vs ' + s.opp : ''}</td><td class="line">${s.gp ? statLine(s, p.p) : '출전 기록 없음'}</td><td>${fmt(v)}</td></tr>`;
   }).join('');
-  $('#pBody').innerHTML = `<table><thead><tr><th>주차</th><th>상대</th><th>기록</th><th>Fan Pts</th></tr></thead><tbody>${body}` +
+  $('#pBody').innerHTML = `<div class="memo"><div class="memo-head">내 메모 <span class="memo-state" id="memoState"></span></div>` +
+    `<textarea id="memoText" placeholder="이 선수에 대한 내 판단, 기억해 둘 경기 등을 적어 두세요. 자동 저장돼요.">${esc(notes.map[pid]?.t || '')}</textarea></div>` +
+    `<table><thead><tr><th>주차</th><th>상대</th><th>기록</th><th>Fan Pts</th></tr></thead><tbody>${body}` +
     `<tr class="total"><td>합계</td><td></td><td class="line">${gp}경기 · 평균 ${gp ? fmt(total / gp) : '-'}</td><td>${fmt(total)}</td></tr></tbody></table>`;
+  $('#memoText').oninput = e => setNote(pid, e.target.value, p.n);
+  notesStatus(notes.map[pid]?.u ? `마지막 수정 ${new Date(notes.map[pid].u).toLocaleString('ko-KR')}` : (notes.token ? '' : '이 기기에만 저장 (메모 동기화로 연결 가능)'));
   $('#dlgPlayer').showModal();
 }
 
@@ -694,6 +858,19 @@ function bind() {
   $('#btnUpdate').addEventListener('click', update);
   $('#btnCsv').addEventListener('click', exportCsv);
   $('#btnRoster').addEventListener('click', () => $('#rosterFile').click());
+  $('#btnSync').addEventListener('click', showSyncDialog);
+  $('#syncSave').addEventListener('click', async () => {
+    const t = $('#syncToken').value.trim();
+    if (!/^(github_pat_|ghp_)\w+$/.test(t)) { notesStatus('github_pat_ 로 시작하는 토큰을 붙여넣어 주세요.'); return; }
+    if (await connectNotes(t)) { $('#syncToken').value = ''; showSyncDialog(); }
+  });
+  $('#syncOff').addEventListener('click', () => {
+    notes.token = ''; notes.sha = null;
+    try { localStorage.removeItem('ffm.notesToken'); } catch { /* ignore */ }
+    showSyncDialog();
+  });
+  $('#dlgPlayer').addEventListener('close', () => { flushNotes(); render(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && notes.token) notesSync(false); });
   $('#rosterFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) importRosterFile(f); e.target.value = ''; });
   $('#btnRules').addEventListener('click', () => $('#dlgRules').showModal());
   $('#rulesReset').addEventListener('click', () => applyPreset('half'));
@@ -723,7 +900,14 @@ function bind() {
 }
 
 async function init() {
+  const tm = location.hash.match(/^#token=(\w+)/);
+  if (tm) {
+    try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+    connectNotes(tm[1]).then(ok => setStatus(ok ? '이 기기의 메모 동기화가 연결됐어요 ✓' : '메모 동기화 연결 실패 — 메모 동기화 버튼에서 다시 시도해 주세요', !ok));
+  }
   bind();
+  notesStatus('');
+  if (notes.token && !tm) notesSync(false);
   $('#preset').value = state.preset;
   buildRulesForm();
   render();
