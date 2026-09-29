@@ -79,6 +79,24 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px 12px; }
 legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px; }
 .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.hide { display: none !important; }
+body.noleague .lg { display: none !important; }
+th.l, td.l { text-align: left; }
+.owner { font-size: 12px; color: var(--muted); }
+.owner.me, .teamname.me { color: var(--accent); font-weight: 700; }
+td.bench { opacity: .45; }
+td.off { opacity: .2; }
+td.win { color: var(--good); font-weight: 700; }
+td.loss { color: var(--muted); }
+.tabs { overflow-x: auto; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.card .row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+.card .row.w b { color: var(--good); }
+.proj { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 6px; }
+.subhead { grid-column: 1 / -1; font-size: 13px; font-weight: 700; color: var(--muted); }
+.teamname { cursor: pointer; font-weight: 600; }
+.teamname:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   h1 { width: 100%; }
   .tablewrap { max-height: none; }
@@ -104,14 +122,27 @@ legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px;
 <main>
   <div class="tabs">
     <button data-tab="all" class="on">전체 선수</button>
-    <button data-tab="mine">내 팀 (<span id="myCount">0</span>)</button>
+    <button data-tab="league" class="lg">리그</button>
+    <button data-tab="roster" class="lg">팀 로스터</button>
+    <button data-tab="mine">관심 선수 ★ (<span id="myCount">0</span>)</button>
   </div>
-  <div class="filters">
+  <div class="filters" id="playerBar">
     <div class="chips" id="posChips"></div>
     <select id="team"><option value="">전체 팀</option></select>
+    <select id="owner" class="lg"></select>
     <input id="search" type="search" placeholder="선수 이름 검색">
     <span class="count" id="count"></span>
   </div>
+  <div class="filters hide" id="leagueBar">
+    <label class="inline">매치업 <select id="mWeek"></select></label>
+    <span class="count" id="leagueNote"></span>
+  </div>
+  <div class="filters hide" id="rosterBar">
+    <select id="rosterTeam"></select>
+    <button id="setMine"></button>
+    <span class="count" id="rosterNote"></span>
+  </div>
+  <div class="cards hide" id="cards"></div>
   <div class="tablewrap"><table id="grid"></table></div>
 </main>
 
@@ -136,6 +167,8 @@ const API_STATE = 'https://api.sleeper.app/v1/state/nfl';
 const API_STATS = (season, wk) => `https://api.sleeper.com/stats/nfl/${season}/${wk}?season_type=regular` +
   ['QB','RB','WR','TE','K','DEF'].map(p => `&position[]=${p}`).join('');
 const MAX_WEEKS = 18;
+// GitHub Actions 가 Yahoo 에서 받아 저장하는 리그 데이터 (로컬 파일로 열 때는 배포본을 읽음)
+const LEAGUE_URLS = ['rosters.json', 'https://sirius4lee-dot.github.io/nfl-fantasy/rosters.json'];
 const POSITIONS = ['ALL','QB','RB','WR','TE','FLEX','K','DEF'];
 const KEEP = ['gp','pass_att','pass_cmp','pass_yd','pass_td','pass_int','pass_2pt','rush_att','rush_yd','rush_td','rush_2pt',
   'rec_tgt','rec','rec_yd','rec_td','rec_2pt','st_td','fum_lost','fgm','fga','fgm_40_49','fgm_50p','fgm_50_59','fgm_60p',
@@ -177,7 +210,8 @@ const state = {
   preset: store.get('preset', 'half'),
   rules: { ...YAHOO_DEFAULT, ...store.get('rules', {}) },
   myTeam: new Set(store.get('myTeam', [])),
-  tab: 'all', pos: 'ALL', team: '', q: '',
+  tab: 'all', pos: 'ALL', team: '', owner: '', q: '',
+  myLeague: store.get('myLeagueTeam', ''), rosterTeam: store.get('myLeagueTeam', ''), mWeek: null,
   sort: { key: 'total', dir: -1 },
 };
 
@@ -249,6 +283,7 @@ async function loadNflState() {
 async function update() {
   const btn = $('#btnUpdate'); btn.disabled = true;
   const season = state.season;
+  loadLeague().then(() => { buildOwnerOptions(); render(); });
   const lastWeek = season === state.currentSeason ? Math.min(Math.max(state.currentWeek, 1), MAX_WEEKS) : MAX_WEEKS;
   const weeks = {}, players = {};
   let done = 0;
@@ -289,6 +324,44 @@ async function update() {
   } finally { btn.disabled = false; }
 }
 
+// ---------- league (Yahoo) ----------
+let league = null, owners = new Map();
+
+async function loadLeague() {
+  for (const u of LEAGUE_URLS) {
+    try {
+      const r = await fetch(u, { cache: 'no-store' });
+      if (r.ok) { league = await r.json(); break; }
+    } catch { /* try next */ }
+  }
+  owners = new Map();
+  if (league) for (const t of league.teams) for (const p of t.roster) owners.set(p.sid, t.id);
+}
+const leagueOn = () => !!(league && league.league && league.league.season === state.season);
+const teamOf = id => (league && league.teams.find(t => t.id === id)) || null;
+const leagueWeeks = () => leagueOn() ? Object.keys(league.weeks).map(Number).sort((a, b) => a - b) : [];
+const matchupOf = (wk, id) => (league.weeks[wk]?.matchups || []).find(m => m.a === id || m.b === id);
+
+function teamWeek(wk, id) {
+  const m = matchupOf(wk, id); if (!m) return null;
+  return { pts: m.a === id ? m.pa : m.pb, win: !!m.winner && m.winner === id, loss: !!m.winner && m.winner !== id };
+}
+
+function ptsOf(sid, wk, pos) {
+  const s = state.data?.weeks[wk]?.[sid];
+  if (!s || !s.gp) return null;
+  return calcPts(s, state.data.players[sid]?.p || pos, state.rules);
+}
+
+function buildOwnerOptions() {
+  const sel = $('#owner');
+  if (!leagueOn()) { sel.innerHTML = ''; state.owner = ''; return; }
+  const opts = [['', '전체 소유'], ['FA', '자유계약 (FA)'], ...(teamOf(state.myLeague) ? [['ME', '내 팀']] : []),
+    ...league.teams.map(t => [t.id, t.name])];
+  if (!opts.some(([v]) => v === state.owner)) state.owner = '';
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${v}" ${v === state.owner ? 'selected' : ''}>${esc(l)}</option>`).join('');
+}
+
 // ---------- rows ----------
 function weekNums() { return state.data ? Object.keys(state.data.weeks).map(Number).sort((a, b) => a - b) : []; }
 
@@ -301,7 +374,8 @@ function buildRows() {
       const s = d.weeks[wk][pid];
       if (s && s.gp) { const v = calcPts(s, p.p, r); pts[wk] = v; total += v; gp++; }
     }
-    rows.push({ pid, ...p, pts, total, gp, avg: gp ? total / gp : 0 });
+    const o = leagueOn() ? owners.get(pid) || '' : '';
+    rows.push({ pid, ...p, pts, total, gp, avg: gp ? total / gp : 0, o, on: o ? teamOf(o)?.name || '' : '' });
   }
   return rows;
 }
@@ -313,6 +387,7 @@ function filterRows(rows) {
     if (state.tab === 'all' && !x.gp) return false;
     if (state.pos === 'FLEX' ? !['RB','WR','TE'].includes(x.p) : state.pos !== 'ALL' && x.p !== state.pos) return false;
     if (state.team && x.t !== state.team) return false;
+    if (state.owner && (state.owner === 'FA' ? x.o : x.o !== (state.owner === 'ME' ? state.myLeague : state.owner))) return false;
     if (q && !x.n.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -331,26 +406,102 @@ function sortRows(rows) {
 // ---------- render ----------
 function heat(v) { return v >= 25 ? 'h3' : v >= 18 ? 'h2' : v >= 12 ? 'h1' : v < 0 ? 'neg' : ''; }
 
+function setTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
+}
+
 function render() {
+  document.body.classList.toggle('noleague', !leagueOn());
+  if (!leagueOn() && (state.tab === 'league' || state.tab === 'roster')) setTab('all');
+  const t = state.tab, lgTab = t === 'league' || t === 'roster';
+  $('#playerBar').classList.toggle('hide', lgTab);
+  $('#leagueBar').classList.toggle('hide', t !== 'league');
+  $('#rosterBar').classList.toggle('hide', t !== 'roster');
+  $('#cards').classList.toggle('hide', t !== 'league');
+  $('#btnCsv').classList.toggle('hide', lgTab);
   $('#myCount').textContent = state.myTeam.size;
+  if (t === 'league') return renderLeague();
+  if (t === 'roster') return renderRoster();
+  renderPlayers();
+}
+
+function renderLeague() {
+  const lw = leagueWeeks();
+  if (!lw.includes(state.mWeek)) state.mWeek = lw[lw.length - 1];
+  $('#mWeek').innerHTML = lw.map(w => `<option value="${w}" ${w === state.mWeek ? 'selected' : ''}>W${w}</option>`).join('');
+  $('#leagueNote').textContent = `${league.league.name} · Yahoo 기준 ${new Date(league.updatedAt).toLocaleString('ko-KR')}`;
+
+  const wk = league.weeks[state.mWeek] || { matchups: [] };
+  const live = wk.status === 'midevent', pre = wk.status === 'preevent';
+  const side = (id, pts, proj, win) => `<div class="row ${win ? 'w' : ''}"><span class="teamname ${id === state.myLeague ? 'me' : ''}" data-team="${id}">${esc(teamOf(id)?.name)}</span>` +
+    `<b>${fmt(pts)}${(live || pre) && proj != null ? `<span class="proj">예상 ${fmt(proj)}</span>` : ''}</b></div>`;
+  $('#cards').innerHTML = `<div class="subhead">W${state.mWeek} 매치업${live ? ' · 진행 중' : pre ? ' · 시작 전' : ''}</div>` +
+    wk.matchups.map(m => `<div class="card">${side(m.a, m.pa, m.projA, m.winner === m.a)}${side(m.b, m.pb, m.projB, m.winner === m.b)}</div>`).join('');
+
+  const teams = [...league.teams].sort((a, b) => (a.rank || 99) - (b.rank || 99));
+  let html = `<thead><tr><th>#</th><th class="stick">팀</th><th>매니저</th><th>전적</th><th>득점</th><th>실점</th>${lw.map(w => `<th>W${w}</th>`).join('')}</tr></thead><tbody>`;
+  for (const t of teams) {
+    html += `<tr class="${t.id === state.myLeague ? 'mine' : ''}"><td>${t.rank || ''}</td>` +
+      `<td class="stick"><span class="teamname ${t.id === state.myLeague ? 'me' : ''}" data-team="${t.id}">${esc(t.name)}</span></td>` +
+      `<td class="l owner">${esc(t.manager)}</td><td>${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''}</td><td>${fmt(t.pf)}</td><td>${fmt(t.pa)}</td>` +
+      lw.map(w => { const r = teamWeek(w, t.id); return `<td class="${r?.win ? 'win' : r?.loss ? 'loss' : ''}">${r ? fmt(r.pts) : ''}</td>`; }).join('') + '</tr>';
+  }
+  $('#grid').innerHTML = html + '</tbody>';
+}
+
+function renderRoster() {
+  if (!teamOf(state.rosterTeam)) state.rosterTeam = teamOf(state.myLeague) ? state.myLeague : league.teams[0].id;
+  const t = teamOf(state.rosterTeam), mine = t.id === state.myLeague;
+  $('#rosterTeam').innerHTML = league.teams.map(x => `<option value="${x.id}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}${x.id === state.myLeague ? ' (내 팀)' : ''} · ${esc(x.manager)}</option>`).join('');
+  $('#setMine').textContent = mine ? '✓ 내 팀' : '내 팀으로 설정';
+  $('#setMine').disabled = mine;
+  $('#rosterNote').textContent = `${t.rank ? t.rank + '위 · ' : ''}${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''} · 흐린 칸 = 벤치`;
+
+  const lw = leagueWeeks();
+  const lineup = w => league.weeks[w]?.lineups?.[t.id] || { starters: [], bench: [] };
+  let html = `<thead><tr><th>슬롯</th><th class="stick">선수</th><th>팀</th>${lw.map(w => `<th>W${w}</th>`).join('')}<th>선발 득점</th></tr></thead><tbody>`;
+  for (const p of t.roster) {
+    const info = state.data?.players[p.sid];
+    let started = 0;
+    const cells = lw.map(w => {
+      const lu = lineup(w), v = ptsOf(p.sid, w, p.pos);
+      const role = lu.starters.includes(p.sid) ? 'start' : lu.bench.includes(p.sid) ? 'bench' : 'off';
+      if (role === 'start' && v != null) started += v;
+      return `<td class="pts ${role === 'start' && v != null ? heat(v) : role}">${v == null ? (role === 'off' ? '' : '-') : fmt(v)}</td>`;
+    }).join('');
+    const name = info ? `<span class="pname" data-pid="${p.sid}">${esc(info.n)}</span>` : esc(p.name);
+    html += `<tr><td class="owner">${esc(p.slot)}</td><td class="stick"><span class="pos">${esc(p.pos)}</span>${name}${info?.inj ? `<span class="inj">${esc(info.inj)}</span>` : ''}</td>` +
+      `<td>${esc(info?.t || p.nfl)}</td>${cells}<td class="tot">${fmt(started)}</td></tr>`;
+  }
+  const calc = w => lineup(w).starters.reduce((a, sid) => a + (ptsOf(sid, w) || 0), 0);
+  html += `<tr class="total"><td></td><td class="stick">선발 합계 (계산)</td><td></td>${lw.map(w => `<td>${fmt(calc(w))}</td>`).join('')}<td></td></tr>`;
+  html += `<tr class="total"><td></td><td class="stick">Yahoo 공식 점수</td><td></td>${lw.map(w => { const r = teamWeek(w, t.id); return `<td class="${r?.win ? 'win' : ''}">${r ? fmt(r.pts) : '-'}</td>`; }).join('')}<td></td></tr>`;
+  $('#grid').innerHTML = html + '</tbody>';
+}
+
+function renderPlayers() {
   const table = $('#grid');
   if (!state.data) { table.innerHTML = `<tr><td class="empty">‘업데이트’를 눌러 데이터를 불러오세요.</td></tr>`; $('#count').textContent = ''; return; }
   const wks = weekNums();
   const rows = sortRows(filterRows(buildRows()));
-  const cols = [['rank','#'],['n','선수'],['t','팀'], ...wks.map(w => ['w' + w, `W${w}`]), ['total','합계'],['avg','평균'],['gp','경기']];
+  const lg = leagueOn();
+  const cols = [['rank','#'],['n','선수'],['t','팀'], ...(lg ? [['on','소유']] : []), ...wks.map(w => ['w' + w, `W${w}`]), ['total','합계'],['avg','평균'],['gp','경기']];
   const s = state.sort;
   let html = '<thead><tr>' + cols.map(([k, l], i) =>
-    `<th data-sort="${k}" class="${i === 1 ? 'stick ' : ''}${s.key === k ? 'sorted' : ''}">${l}${s.key === k ? (s.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('') + '</tr></thead><tbody>';
+    `<th data-sort="${k}" class="${i === 1 ? 'stick ' : ''}${k === 'on' ? 'l ' : ''}${s.key === k ? 'sorted' : ''}">${l}${s.key === k ? (s.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('') + '</tr></thead><tbody>';
   if (!rows.length) {
-    html += `<tr><td colspan="${cols.length}" class="empty">${state.tab === 'mine' ? '내 팀에 선수가 없어요. 전체 선수 목록에서 ☆를 눌러 추가하세요.' : '조건에 맞는 선수가 없어요.'}</td></tr>`;
+    html += `<tr><td colspan="${cols.length}" class="empty">${state.tab === 'mine' ? '관심 선수가 없어요. 전체 선수 목록에서 ☆를 눌러 추가하세요.' : '조건에 맞는 선수가 없어요.'}</td></tr>`;
   }
   rows.forEach((x, i) => {
     const mine = state.myTeam.has(x.pid);
-    html += `<tr class="${mine && state.tab === 'all' ? 'mine' : ''}">` +
+    const myOwn = lg && x.o && x.o === state.myLeague;
+    html += `<tr class="${(mine && state.tab === 'all') || myOwn ? 'mine' : ''}">` +
       `<td>${i + 1}</td>` +
-      `<td class="stick"><button class="star ${mine ? 'on' : ''}" data-star="${x.pid}" title="내 팀 추가/제거">${mine ? '★' : '☆'}</button>` +
+      `<td class="stick"><button class="star ${mine ? 'on' : ''}" data-star="${x.pid}" title="관심 선수 추가/제거">${mine ? '★' : '☆'}</button>` +
       `<span class="pos">${x.p}</span><span class="pname" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
       `<td>${x.t}</td>` +
+      (lg ? `<td class="l owner ${myOwn ? 'me' : ''}">${x.o ? esc(x.on) : 'FA'}</td>` : '') +
       wks.map(w => {
         const v = x.pts[w];
         if (v == null) {
@@ -364,7 +515,7 @@ function render() {
   if (state.tab === 'mine' && rows.length) {
     const sum = w => rows.reduce((a, x) => a + (x.pts[w] || 0), 0);
     const tot = rows.reduce((a, x) => a + x.total, 0);
-    html += `<tr class="total"><td></td><td class="stick">팀 합계</td><td></td>${wks.map(w => `<td>${fmt(sum(w))}</td>`).join('')}<td>${fmt(tot)}</td><td>${wks.length ? fmt(tot / wks.length) : '-'}</td><td></td></tr>`;
+    html += `<tr class="total"><td></td><td class="stick">합계</td><td></td>${lg ? '<td></td>' : ''}${wks.map(w => `<td>${fmt(sum(w))}</td>`).join('')}<td>${fmt(tot)}</td><td>${wks.length ? fmt(tot / wks.length) : '-'}</td><td></td></tr>`;
   }
   table.innerHTML = html + '</tbody>';
   $('#count').textContent = `${rows.length}명`;
@@ -380,9 +531,10 @@ function buildTeamOptions() {
 function openPlayer(pid) {
   const p = state.data.players[pid]; if (!p) return;
   const wks = weekNums();
-  $('#pTitle').innerHTML = `${esc(p.n)} <span class="pos">${p.p} · ${p.t}</span>${p.inj ? `<span class="inj">${esc(p.inj)}</span>` : ''}`;
+  const own = leagueOn() ? teamOf(owners.get(pid)) : null;
+  $('#pTitle').innerHTML = `${esc(p.n)} <span class="pos">${p.p} · ${p.t}${leagueOn() ? ' · ' + (own ? esc(own.name) : 'FA') : ''}</span>${p.inj ? `<span class="inj">${esc(p.inj)}</span>` : ''}`;
   const starBtn = $('#pStar');
-  const syncStar = () => { starBtn.textContent = state.myTeam.has(pid) ? '★ 내 팀에서 빼기' : '☆ 내 팀에 추가'; };
+  const syncStar = () => { starBtn.textContent = state.myTeam.has(pid) ? '★ 관심 해제' : '☆ 관심 선수'; };
   syncStar();
   starBtn.onclick = () => { toggleMine(pid); syncStar(); };
   let total = 0, gp = 0;
@@ -424,8 +576,9 @@ function exportCsv() {
   if (!state.data) return;
   const wks = weekNums();
   const rows = sortRows(filterRows(buildRows()));
-  const head = ['Player','Pos','Team', ...wks.map(w => 'W' + w), 'Total','Avg','GP'];
-  const lines = [head, ...rows.map(x => [x.n, x.p, x.t, ...wks.map(w => x.pts[w] != null ? fmt(x.pts[w]) : ''), fmt(x.total), fmt(x.avg), x.gp])]
+  const lg = leagueOn();
+  const head = ['Player','Pos','Team', ...(lg ? ['Owner'] : []), ...wks.map(w => 'W' + w), 'Total','Avg','GP'];
+  const lines = [head, ...rows.map(x => [x.n, x.p, x.t, ...(lg ? [x.o ? x.on : 'FA'] : []), ...wks.map(w => x.pts[w] != null ? fmt(x.pts[w]) : ''), fmt(x.total), fmt(x.avg), x.gp])]
     .map(r => r.map(c => /[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c).join(','));
   const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -439,7 +592,7 @@ function selectSeason(season) {
   state.season = season;
   store.set('season', season);
   state.data = store.get('cache.' + season, null);
-  buildTeamOptions(); render();
+  buildTeamOptions(); buildOwnerOptions(); render();
   if (state.data) {
     setStatus(`${season} 시즌 저장된 데이터 (${new Date(state.data.fetchedAt).toLocaleString('ko-KR')} 기준) · 최신 점수는 ‘업데이트’를 누르세요.`);
     // current season: refresh automatically if cache is older than 1 hour
@@ -457,9 +610,19 @@ function bind() {
   });
   document.querySelector('.tabs').addEventListener('click', e => {
     const b = e.target.closest('[data-tab]'); if (!b) return;
-    state.tab = b.dataset.tab;
-    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-    render();
+    setTab(b.dataset.tab); render();
+    try { history.replaceState(null, '', '#' + state.tab); } catch { /* file:// 등 */ }
+  });
+  $('#owner').addEventListener('change', e => { state.owner = e.target.value; render(); });
+  $('#mWeek').addEventListener('change', e => { state.mWeek = +e.target.value; render(); });
+  $('#rosterTeam').addEventListener('change', e => { state.rosterTeam = e.target.value; render(); });
+  $('#setMine').addEventListener('click', () => {
+    state.myLeague = state.rosterTeam; store.set('myLeagueTeam', state.myLeague);
+    buildOwnerOptions(); render();
+  });
+  document.querySelector('main').addEventListener('click', e => {
+    const t = e.target.closest('[data-team]'); if (!t) return;
+    state.rosterTeam = t.dataset.team; setTab('roster'); render();
   });
   $('#team').addEventListener('change', e => { state.team = e.target.value; render(); });
   $('#search').addEventListener('input', e => { state.q = e.target.value; render(); });
@@ -485,7 +648,7 @@ function bind() {
     const th = e.target.closest('th[data-sort]');
     if (th) {
       const k = th.dataset.sort; if (k === 'rank') return;
-      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['n','t'].includes(k) ? 1 : -1 };
+      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['n','t','on'].includes(k) ? 1 : -1 };
       render(); return;
     }
     const star = e.target.closest('[data-star]');
@@ -503,13 +666,15 @@ async function init() {
   buildRulesForm();
   render();
   setStatus('NFL 시즌 정보 확인 중…');
-  await loadNflState();
+  await Promise.all([loadNflState(), loadLeague()]);
   const seasons = [];
   for (let y = state.currentSeason; y >= state.currentSeason - 4; y--) seasons.push(y);
   $('#season').innerHTML = seasons.map(y => `<option value="${y}">${y}</option>`).join('');
   const saved = store.get('season', state.currentSeason);
   const season = seasons.includes(saved) ? saved : state.currentSeason;
   $('#season').value = season;
+  const hashTab = location.hash.slice(1);
+  if (['all', 'league', 'roster', 'mine'].includes(hashTab)) setTab(hashTab);
   selectSeason(season);
 }
 

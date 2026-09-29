@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Yahoo 인증 코드</title>
+<style>
+:root { --bg: #f6f7f9; --panel: #fff; --text: #1b1f24; --muted: #667080; --line: #e3e6ea; --accent: #6001d2; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #111418; --panel: #1a1e24; --text: #e7eaee; --muted: #9aa3ae; --line: #2c323a; --accent: #b388ff; }
+}
+:root[data-theme="dark"] { --bg: #111418; --panel: #1a1e24; --text: #e7eaee; --muted: #9aa3ae; --line: #2c323a; --accent: #b388ff; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Malgun Gothic", sans-serif; display: grid; place-items: center; min-height: 100vh; padding: 16px; box-sizing: border-box; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 16px; }
+code { display: block; font-size: 20px; letter-spacing: 1px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; word-break: break-all; margin-bottom: 12px; }
+button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">Yahoo 인증 코드</h1>
+  <p id="desc">아래 코드를 복사해서 설정 스크립트(터미널)에 붙여넣으세요. 코드는 몇 분 안에 만료돼요.</p>
+  <code id="code"></code>
+  <button id="copy">복사</button>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+const code = q.get('code');
+if (code) {
+  document.getElementById('code').textContent = code;
+} else {
+  document.getElementById('title').textContent = '코드가 없어요';
+  document.getElementById('desc').textContent = q.get('error_description') || q.get('error') || 'Yahoo 인증 후 이 페이지로 돌아오면 코드가 표시돼요.';
+  document.getElementById('code').remove();
+  document.getElementById('copy').remove();
+}
+document.getElementById('copy')?.addEventListener('click', async e => {
+  try { await navigator.clipboard.writeText(code); e.target.textContent = '복사됨 ✓'; }
+  catch { getSelection().selectAllChildren(document.getElementById('code')); }
+});
+</script>
+</body>
+</html>
