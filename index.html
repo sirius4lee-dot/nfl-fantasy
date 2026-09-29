@@ -92,6 +92,7 @@ legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px;
 body.noleague .lg { display: none !important; }
 th.l, td.l { text-align: left; }
 .owner { font-size: 12px; color: var(--muted); }
+.fa { color: var(--bad); font-weight: 700; }
 .owner.me, .teamname.me { color: var(--accent); font-weight: 700; }
 td.bench { opacity: .45; }
 td.off { opacity: .2; }
@@ -593,7 +594,7 @@ function renderPlayers() {
       `<td class="stick"><button class="star ${mine ? 'on' : ''}" data-star="${x.pid}" title="관심 선수 추가/제거">${mine ? '★' : '☆'}</button>` +
       `<span class="pos">${x.p}</span><span class="pname${hasNote(x.pid) ? ' has-note' : ''}" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
       `<td>${x.t}</td>` +
-      (lg ? `<td class="l owner ${myOwn ? 'me' : ''}">${x.o ? esc(x.on) : 'FA'}</td>` : '') +
+      (lg ? `<td class="l owner ${myOwn ? 'me' : ''}">${x.o ? esc(x.on) : '<span class="fa">FA</span>'}</td>` : '') +
       wks.map(w => {
         const v = x.pts[w];
         if (v == null) {
@@ -751,7 +752,7 @@ function openPlayer(pid) {
   const p = state.data.players[pid]; if (!p) return;
   const wks = weekNums();
   const own = leagueOn() ? teamOf(owners.get(pid)) : null;
-  $('#pTitle').innerHTML = `${esc(p.n)} <span class="pos">${p.p} · ${p.t}${leagueOn() ? ' · ' + (own ? esc(own.name) : 'FA') : ''}</span>${p.inj ? `<span class="inj">${esc(p.inj)}</span>` : ''}`;
+  $('#pTitle').innerHTML = `${esc(p.n)} <span class="pos">${p.p} · ${p.t}${leagueOn() ? ' · ' + (own ? esc(own.name) : '<span class="fa">FA</span>') : ''}</span>${p.inj ? `<span class="inj">${esc(p.inj)}</span>` : ''}`;
   const starBtn = $('#pStar');
   const syncStar = () => { starBtn.textContent = state.myTeam.has(pid) ? '★ 관심 해제' : '☆ 관심 선수'; };
   syncStar();
