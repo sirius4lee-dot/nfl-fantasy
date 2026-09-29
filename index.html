@@ -80,6 +80,7 @@ fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; 
 legend { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 4px; }
 .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
 .hide { display: none !important; }
+.helplink { color: var(--accent); font-size: 13px; }
 body.noleague .lg { display: none !important; }
 th.l, td.l { text-align: left; }
 .owner { font-size: 12px; color: var(--muted); }
@@ -115,6 +116,9 @@ td.loss { color: var(--muted); }
   </select></label>
   <button id="btnRules">점수 규칙</button>
   <button id="btnCsv">CSV 내보내기</button>
+  <button id="btnRoster" title="북마클릿으로 받은 rosters.json 을 이 기기에 바로 적용">로스터 파일</button>
+  <a href="bookmarklet.html" class="helplink">로스터 가져오기 안내</a>
+  <input id="rosterFile" type="file" accept=".json,application/json" hidden>
   <button id="btnUpdate" class="primary">업데이트</button>
   <div class="status" id="status"></div>
 </header>
@@ -316,6 +320,7 @@ async function update() {
     const saved = store.set('cache.' + season, data);
     if (state.season !== season) return; // user switched season meanwhile
     state.data = data;
+    prepareLeague(); buildOwnerOptions();
     const nW = Object.keys(weeks).length;
     setStatus(`${season} 시즌 ${nW}개 주차 업데이트 완료 · ${new Date().toLocaleString('ko-KR')}` + (saved ? '' : ' (브라우저 저장 공간 부족으로 캐시는 저장 안 됨)'));
     buildTeamOptions(); render();
@@ -325,17 +330,63 @@ async function update() {
 }
 
 // ---------- league (Yahoo) ----------
-let league = null, owners = new Map();
+let rawLeague = null, league = null, owners = new Map();
 
 async function loadLeague() {
+  let remote = null;
   for (const u of LEAGUE_URLS) {
     try {
       const r = await fetch(u, { cache: 'no-store' });
-      if (r.ok) { league = await r.json(); break; }
+      if (r.ok) { remote = await r.json(); break; }
     } catch { /* try next */ }
   }
-  owners = new Map();
-  if (league) for (const t of league.teams) for (const p of t.roster) owners.set(p.sid, t.id);
+  // 이 기기에서 직접 불러온 파일이 더 최신이면 그걸 사용
+  const local = store.get('leagueLocal', null);
+  rawLeague = [remote, local].filter(Boolean).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] || null;
+  prepareLeague();
+}
+
+const normName = s => String(s || '').toLowerCase().replace(/[.'’\-]/g, '').replace(/\b(jr|sr|ii|iii|iv|v)\b/g, '').replace(/\s+/g, '');
+
+// 북마클릿 파일은 Yahoo 선수 번호 기준 -> 이름·포지션으로 Sleeper 선수와 연결
+function prepareLeague() {
+  league = null; owners = new Map();
+  if (!rawLeague) return;
+  if (!rawLeague.players) league = rawLeague;
+  else {
+    const idx = new Map();
+    for (const [pid, p] of Object.entries(state.data?.players || {})) {
+      const k = normName(p.n);
+      idx.set(k + '|' + p.p, pid);
+      if (!idx.has(k)) idx.set(k, pid);
+    }
+    const P = rawLeague.players;
+    const sidOf = yid => {
+      const p = P[yid]; if (!p) return 'y' + yid;
+      if (p.pos === 'DEF') return p.nfl;
+      const k = normName(p.name);
+      return idx.get(k + '|' + p.pos) || idx.get(k) || 'y' + yid;
+    };
+    league = {
+      ...rawLeague,
+      teams: rawLeague.teams.map(t => ({ ...t, roster: t.roster.map(r => ({ sid: sidOf(r.yid), name: P[r.yid]?.name, pos: P[r.yid]?.pos, nfl: P[r.yid]?.nfl, slot: r.slot })) })),
+      weeks: Object.fromEntries(Object.entries(rawLeague.weeks).map(([w, wk]) => [w, { ...wk,
+        lineups: Object.fromEntries(Object.entries(wk.lineups).map(([tid, lu]) => [tid, { starters: lu.starters.map(sidOf), bench: lu.bench.map(sidOf) }])) }])),
+    };
+  }
+  for (const t of league.teams) for (const p of t.roster) owners.set(p.sid, t.id);
+}
+
+async function importRosterFile(file) {
+  try {
+    const j = JSON.parse(await file.text());
+    if (!j.teams || !j.weeks || !j.league) throw new Error('rosters.json 형식이 아니에요');
+    if (!store.set('leagueLocal', j)) throw new Error('브라우저 저장 공간이 부족해요');
+    rawLeague = j; prepareLeague();
+    if (j.league.season !== state.season) { $('#season').value = j.league.season; selectSeason(j.league.season); }
+    buildOwnerOptions(); setTab('league'); render();
+    setStatus(`로스터 파일 적용 완료 · ${j.league.name} (${new Date(j.updatedAt).toLocaleString('ko-KR')} 기준) · 다른 기기에도 보이게 하려면 GitHub에 올려 주세요.`);
+  } catch (e) { setStatus('로스터 파일을 읽지 못했어요: ' + e.message, true); }
 }
 const leagueOn = () => !!(league && league.league && league.league.season === state.season);
 const teamOf = id => (league && league.teams.find(t => t.id === id)) || null;
@@ -430,7 +481,7 @@ function renderLeague() {
   const lw = leagueWeeks();
   if (!lw.includes(state.mWeek)) state.mWeek = lw[lw.length - 1];
   $('#mWeek').innerHTML = lw.map(w => `<option value="${w}" ${w === state.mWeek ? 'selected' : ''}>W${w}</option>`).join('');
-  $('#leagueNote').textContent = `${league.league.name} · Yahoo 기준 ${new Date(league.updatedAt).toLocaleString('ko-KR')}`;
+  $('#leagueNote').textContent = `${league.league.name} · 로스터 ${new Date(league.updatedAt).toLocaleString('ko-KR')} 기준`;
 
   const wk = league.weeks[state.mWeek] || { matchups: [] };
   const live = wk.status === 'midevent', pre = wk.status === 'preevent';
@@ -440,11 +491,12 @@ function renderLeague() {
     wk.matchups.map(m => `<div class="card">${side(m.a, m.pa, m.projA, m.winner === m.a)}${side(m.b, m.pb, m.projB, m.winner === m.b)}</div>`).join('');
 
   const teams = [...league.teams].sort((a, b) => (a.rank || 99) - (b.rank || 99));
-  let html = `<thead><tr><th>#</th><th class="stick">팀</th><th>매니저</th><th>전적</th><th>득점</th><th>실점</th>${lw.map(w => `<th>W${w}</th>`).join('')}</tr></thead><tbody>`;
+  const hasMgr = teams.some(t => t.manager);
+  let html = `<thead><tr><th>#</th><th class="stick">팀</th>${hasMgr ? '<th>매니저</th>' : ''}<th>전적</th><th>득점</th><th>실점</th>${lw.map(w => `<th>W${w}</th>`).join('')}</tr></thead><tbody>`;
   for (const t of teams) {
     html += `<tr class="${t.id === state.myLeague ? 'mine' : ''}"><td>${t.rank || ''}</td>` +
       `<td class="stick"><span class="teamname ${t.id === state.myLeague ? 'me' : ''}" data-team="${t.id}">${esc(t.name)}</span></td>` +
-      `<td class="l owner">${esc(t.manager)}</td><td>${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''}</td><td>${fmt(t.pf)}</td><td>${fmt(t.pa)}</td>` +
+      (hasMgr ? `<td class="l owner">${esc(t.manager)}</td>` : '') + `<td>${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''}</td><td>${fmt(t.pf)}</td><td>${fmt(t.pa)}</td>` +
       lw.map(w => { const r = teamWeek(w, t.id); return `<td class="${r?.win ? 'win' : r?.loss ? 'loss' : ''}">${r ? fmt(r.pts) : ''}</td>`; }).join('') + '</tr>';
   }
   $('#grid').innerHTML = html + '</tbody>';
@@ -453,7 +505,7 @@ function renderLeague() {
 function renderRoster() {
   if (!teamOf(state.rosterTeam)) state.rosterTeam = teamOf(state.myLeague) ? state.myLeague : league.teams[0].id;
   const t = teamOf(state.rosterTeam), mine = t.id === state.myLeague;
-  $('#rosterTeam').innerHTML = league.teams.map(x => `<option value="${x.id}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}${x.id === state.myLeague ? ' (내 팀)' : ''} · ${esc(x.manager)}</option>`).join('');
+  $('#rosterTeam').innerHTML = league.teams.map(x => `<option value="${x.id}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}${x.id === state.myLeague ? ' (내 팀)' : ''}${x.manager ? ' · ' + esc(x.manager) : ''}</option>`).join('');
   $('#setMine').textContent = mine ? '✓ 내 팀' : '내 팀으로 설정';
   $('#setMine').disabled = mine;
   $('#rosterNote').textContent = `${t.rank ? t.rank + '위 · ' : ''}${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''} · 흐린 칸 = 벤치`;
@@ -592,6 +644,7 @@ function selectSeason(season) {
   state.season = season;
   store.set('season', season);
   state.data = store.get('cache.' + season, null);
+  prepareLeague();
   buildTeamOptions(); buildOwnerOptions(); render();
   if (state.data) {
     setStatus(`${season} 시즌 저장된 데이터 (${new Date(state.data.fetchedAt).toLocaleString('ko-KR')} 기준) · 최신 점수는 ‘업데이트’를 누르세요.`);
@@ -633,6 +686,8 @@ function bind() {
   });
   $('#btnUpdate').addEventListener('click', update);
   $('#btnCsv').addEventListener('click', exportCsv);
+  $('#btnRoster').addEventListener('click', () => $('#rosterFile').click());
+  $('#rosterFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) importRosterFile(f); e.target.value = ''; });
   $('#btnRules').addEventListener('click', () => $('#dlgRules').showModal());
   $('#rulesReset').addEventListener('click', () => applyPreset('half'));
   $('#rulesForm').addEventListener('input', e => {
