@@ -340,9 +340,16 @@ async function loadLeague() {
       if (r.ok) { const j = await r.json(); if (j && j.teams && j.weeks && j.league) remote = j; break; }
     } catch { /* try next */ }
   }
-  // 이 기기에서 직접 불러온 파일이 더 최신이면 그걸 사용
-  const local = store.get('leagueLocal', null);
-  rawLeague = [remote, local].filter(Boolean).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] || null;
+  // 이 기기에서 직접 불러온 파일은 GitHub 데이터가 그 뒤로 갱신되지 않았을 때만 사용
+  // (파일 안의 updatedAt 이 아니라 불러온 시각으로 비교: 예전 테스트 파일이 계속 남는 문제 방지)
+  try { localStorage.removeItem('ffm.leagueLocal'); } catch { /* 구버전 키 정리 */ }
+  const local = store.get('leagueImport', null);
+  if (remote && (!local || Date.parse(remote.updatedAt) >= local.importedAt)) {
+    rawLeague = remote;
+    if (local) try { localStorage.removeItem('ffm.leagueImport'); } catch { /* ignore */ }
+  } else {
+    rawLeague = local ? local.data : remote;
+  }
   prepareLeague();
 }
 
@@ -381,7 +388,7 @@ async function importRosterFile(file) {
   try {
     const j = JSON.parse(await file.text());
     if (!j.teams || !j.weeks || !j.league) throw new Error('rosters.json 형식이 아니에요');
-    if (!store.set('leagueLocal', j)) throw new Error('브라우저 저장 공간이 부족해요');
+    if (!store.set('leagueImport', { importedAt: Date.now(), data: j })) throw new Error('브라우저 저장 공간이 부족해요');
     rawLeague = j; prepareLeague();
     if (j.league.season !== state.season) { $('#season').value = j.league.season; selectSeason(j.league.season); }
     buildOwnerOptions(); setTab('league'); render();
