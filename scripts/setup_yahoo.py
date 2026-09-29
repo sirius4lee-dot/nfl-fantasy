@@ -73,6 +73,11 @@ def main():
         sys.exit(f'토큰 발급 실패 (HTTP {e.code}): {e.read().decode("utf-8", "replace")}\n'
                  '코드는 몇 분 안에 만료되고 한 번만 쓸 수 있어요. 처음부터 다시 실행해 주세요.')
 
+    # 진단: 토큰 정보(값 제외)와 사용자 정보가 필요 없는 기본 호출부터 확인
+    print(f"\n[진단] 앱 ID {client_id[-6:]} · 토큰 항목: {', '.join(sorted(tok))}")
+    game = yget('game/nfl', tok['access_token']).find('game')
+    print(f"[진단] Fantasy API 기본 호출 OK: {game.findtext('name')} {game.findtext('season')}")
+
     # 로그인한 계정이 참여 중인 NFL 리그 목록에서 고르기
     root = yget('users;use_login=1/games;game_codes=nfl/leagues', tok['access_token'])
     leagues = []
