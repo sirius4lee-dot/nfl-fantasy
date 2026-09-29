@@ -54,6 +54,17 @@ a { color: var(--accent); }
     <p class="muted">트레이드·웨이버가 있었거나 한 주가 끝났을 때 다시 누르면 돼요. 선수 Fan Pts는 기록장의 ‘업데이트’ 버튼이 따로 최신으로 유지해요.</p>
   </div>
 
+  <h2>버튼을 눌러도 아무 반응이 없을 때 (콘솔로 실행)</h2>
+  <div class="card">
+    <ol>
+      <li>아래 <b>콘솔용 코드 복사</b>를 누르세요.</li>
+      <li>Yahoo 리그 홈에서 <b>F12</b> → 위쪽 <b>Console(콘솔)</b> 탭을 여세요.</li>
+      <li>처음 한 번은 붙여넣기가 막혀 있어요. 입력줄에 <code>allow pasting</code> 을 직접 타이핑하고 Enter.</li>
+      <li><b>Ctrl+V</b>로 코드를 붙여넣고 Enter. 오른쪽 위에 검은 진행 상자가 나타나요.</li>
+    </ol>
+    <button id="copyRaw">콘솔용 코드 복사</button>
+  </div>
+
   <h2>폰에서만 쓸 때</h2>
   <div class="card">
     <p class="muted">모바일 브라우저는 북마크 설치가 번거로워요. 로스터 가져오기는 PC에서 하고 GitHub에 올리면, 폰에서는 기록장을 열기만 하면 돼요.</p>
@@ -62,9 +73,9 @@ a { color: var(--accent); }
 <script>
 (async () => {
   const bm = document.getElementById('bm'), st = document.getElementById('bmState');
-  let href = '';
+  let href = '', code = '';
   try {
-    const code = await (await fetch('yahoo-sync.js', { cache: 'no-store' })).text();
+    code = await (await fetch('yahoo-sync.js', { cache: 'no-store' })).text();
     href = 'javascript:' + encodeURIComponent(code.replace(/^\s*\/\/.*$/gm, ''));
     bm.href = href;
     st.textContent = '← 이 버튼을 북마크바로 끌어다 놓기';
@@ -76,6 +87,11 @@ a { color: var(--accent); }
     if (!href) return;
     try { await navigator.clipboard.writeText(href); e.target.textContent = '복사됨 ✓'; }
     catch { prompt('아래 내용을 복사하세요', href); }
+  });
+  document.getElementById('copyRaw').addEventListener('click', async e => {
+    if (!code) return;
+    try { await navigator.clipboard.writeText(code); e.target.textContent = '복사됨 ✓'; }
+    catch { prompt('아래 내용을 복사하세요', code); }
   });
 })();
 </script>
