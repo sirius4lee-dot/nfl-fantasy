@@ -115,16 +115,26 @@
       players, teams, weeks,
     };
     const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'rosters.json' });
-    document.body.appendChild(a); a.click(); a.remove();
+    const url = URL.createObjectURL(blob);
+    const save = () => {
+      const a = Object.assign(document.createElement('a'), { href: url, download: 'rosters.json' });
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    save();
 
+    const btn = 'all:revert;cursor:pointer;margin:4px 4px 0 0';
     say(`<b>완료!</b> ${teams.length}팀 · ${cur}개 주차 · 선수 ${Object.keys(players).length}명<br>` +
-      `<b>rosters.json</b> 파일이 다운로드됐어요.<br><br>` +
-      `<a href="${UPLOAD_URL}" target="_blank" style="color:#b388ff;font-weight:700">① GitHub에 올리기 (파일 끌어놓기 → Commit)</a><br>` +
-      `<span style="opacity:.7;font-size:12px">또는 기록장의 ‘로스터 파일’ 버튼으로 이 기기에만 바로 적용</span><br><br>` +
-      `<button style="all:revert;cursor:pointer" onclick="this.closest('div').remove()">닫기</button>`);
+      `<b>rosters.json</b> 파일을 다운로드 폴더에 저장했어요.<br>` +
+      `<span style="opacity:.7;font-size:12px">다운로드가 안 보이면 아래 ‘파일 다시 저장’을 누르세요.</span><br>` +
+      `<button id="ffm-save" style="${btn}">파일 다시 저장</button><br><br>` +
+      `다음 단계: <a href="${UPLOAD_URL}" target="_blank" style="color:#b388ff;font-weight:700">GitHub에 올리기 ↗</a><br>` +
+      `<span style="opacity:.7;font-size:12px">열린 페이지에 rosters.json 을 끌어다 놓고 아래 초록색 ‘Commit changes’</span><br><br>` +
+      `<button id="ffm-close" style="${btn}">닫기</button>`);
+    box.querySelector('#ffm-save').onclick = save;
+    box.querySelector('#ffm-close').onclick = () => box.remove();
   } catch (e) {
     say(`<b>실패:</b> ${String(e.message || e).replace(/</g, '&lt;')}<br><br>` +
-      `<button style="all:revert;cursor:pointer" onclick="this.closest('div').remove()">닫기</button>`);
+      `<button id="ffm-close" style="all:revert;cursor:pointer">닫기</button>`);
+    box.querySelector('#ffm-close').onclick = () => box.remove();
   }
 })();
