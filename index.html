@@ -116,7 +116,7 @@ td.loss { color: var(--muted); }
   </select></label>
   <button id="btnRules">점수 규칙</button>
   <button id="btnCsv">CSV 내보내기</button>
-  <button id="btnRoster" title="북마클릿으로 받은 rosters.json 을 이 기기에 바로 적용">로스터 파일</button>
+  <button id="btnRoster" title="북마클릿 데이터를 파일로 저장해 둔 경우 이 기기에 바로 적용">로스터 파일</button>
   <a href="bookmarklet.html" class="helplink">로스터 가져오기 안내</a>
   <input id="rosterFile" type="file" accept=".json,application/json" hidden>
   <button id="btnUpdate" class="primary">업데이트</button>
@@ -337,7 +337,7 @@ async function loadLeague() {
   for (const u of LEAGUE_URLS) {
     try {
       const r = await fetch(u, { cache: 'no-store' });
-      if (r.ok) { remote = await r.json(); break; }
+      if (r.ok) { const j = await r.json(); if (j && j.teams && j.weeks && j.league) remote = j; break; }
     } catch { /* try next */ }
   }
   // 이 기기에서 직접 불러온 파일이 더 최신이면 그걸 사용

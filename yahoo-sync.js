@@ -1,7 +1,7 @@
 // Yahoo 판타지 리그 페이지에서 실행하는 북마클릿 본체.
 // 로그인된 브라우저 안에서 같은 사이트의 페이지만 읽어 rosters.json 을 만든다 (로그인 정보는 밖으로 나가지 않음).
 (async () => {
-  const UPLOAD_URL = 'https://github.com/sirius4lee-dot/nfl-fantasy/upload/main';
+  const EDIT_URL = 'https://github.com/sirius4lee-dot/nfl-fantasy/edit/main/rosters.json';
   const BENCH = ['BN', 'IR', 'IR+', 'NA'];
   const m = location.pathname.match(/\/f1\/(\d+)/);
   if (location.hostname !== 'football.fantasysports.yahoo.com' || !m) {
@@ -115,24 +115,29 @@
       league: { id: lid, name: leagueName, season, currentWeek: cur, numTeams: teams.length },
       players, teams, weeks,
     };
-    const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const save = () => {
-      const a = Object.assign(document.createElement('a'), { href: url, download: 'rosters.json' });
-      document.body.appendChild(a); a.click(); a.remove();
+    const json = JSON.stringify(out);
+    // Yahoo 페이지는 파일 다운로드를 막아서, 클립보드 복사 → GitHub 편집 화면에 붙여넣기 방식을 쓴다
+    const copy = async () => {
+      try { await navigator.clipboard.writeText(json); return true; } catch { /* 아래 방식으로 재시도 */ }
+      const ta = Object.assign(document.createElement('textarea'), { value: json });
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+      return ok;
     };
-    save();
 
-    const btn = 'all:revert;cursor:pointer;margin:4px 4px 0 0';
-    say(`<b>완료!</b> ${teams.length}팀 · ${cur}개 주차 · 선수 ${Object.keys(players).length}명<br>` +
-      `<b>rosters.json</b> 파일을 다운로드 폴더에 저장했어요.<br>` +
-      `<span style="opacity:.7;font-size:12px">다운로드가 안 보이면 아래 ‘파일 다시 저장’을 누르세요.</span><br>` +
-      `<button id="ffm-save" style="${btn}">파일 다시 저장</button><br><br>` +
+    const btn = 'all:revert;cursor:pointer;margin:4px 4px 0 0;padding:6px 12px;font-size:14px';
+    say(`<b>완료!</b> ${teams.length}팀 · ${cur}개 주차 · 선수 ${Object.keys(players).length}명<br><br>` +
       (errors.length ? `<span style="color:#ffb74d;font-size:12px">일부 경고: ${errors.slice(0, 3).join(' / ').replace(/</g, '&lt;')}</span><br><br>` : '') +
-      `다음 단계: <a href="${UPLOAD_URL}" target="_blank" style="color:#b388ff;font-weight:700">GitHub에 올리기 ↗</a><br>` +
-      `<span style="opacity:.7;font-size:12px">열린 페이지에 rosters.json 을 끌어다 놓고 아래 초록색 ‘Commit changes’</span><br><br>` +
+      `<b>① </b><button id="ffm-copy" style="${btn}">📋 데이터 복사</button> <span id="ffm-copied"></span><br><br>` +
+      `<b>② </b><a href="${EDIT_URL}" target="_blank" style="color:#b388ff;font-weight:700">GitHub 편집 화면 열기 ↗</a><br>` +
+      `<span style="opacity:.8;font-size:12px">열린 화면의 글상자를 클릭 → <b>Ctrl+A</b> → <b>Ctrl+V</b><br>→ 오른쪽 위 초록색 <b>Commit changes…</b> → 한 번 더 <b>Commit changes</b></span><br><br>` +
       `<button id="ffm-close" style="${btn}">닫기</button>`);
-    box.querySelector('#ffm-save').onclick = save;
+    box.querySelector('#ffm-copy').onclick = async () => {
+      box.querySelector('#ffm-copied').textContent = (await copy()) ? '복사됨 ✓' : '복사 실패 — 다시 눌러 주세요';
+    };
     box.querySelector('#ffm-close').onclick = () => box.remove();
   } catch (e) {
     say(`<b>실패:</b> ${String(e.message || e).replace(/</g, '&lt;')}<br><br>` +
