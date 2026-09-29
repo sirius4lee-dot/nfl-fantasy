@@ -2,6 +2,11 @@
 // 로그인된 브라우저 안에서 같은 사이트의 페이지만 읽어 rosters.json 을 만든다 (로그인 정보는 밖으로 나가지 않음).
 (async () => {
   const EDIT_URL = 'https://github.com/sirius4lee-dot/nfl-fantasy/edit/main/rosters.json';
+  const SITE_URL = 'https://sirius4lee-dot.github.io/nfl-fantasy/';
+  const API_URL = 'https://api.github.com/repos/sirius4lee-dot/nfl-fantasy/contents/rosters.json';
+  // bookmarklet.html 에서 "자동 올리기" 버튼을 만들 때 개인 토큰으로 바뀐다 (저장소에는 절대 넣지 않음)
+  const GH_TOKEN = '__GH_TOKEN__';
+  const autoPush = !GH_TOKEN.startsWith('__');
   const BENCH = ['BN', 'IR', 'IR+', 'NA'];
   const m = location.pathname.match(/\/f1\/(\d+)/);
   if (location.hostname !== 'football.fantasysports.yahoo.com' || !m) {
@@ -129,8 +134,40 @@
     };
 
     const btn = 'all:revert;cursor:pointer;margin:4px 4px 0 0;padding:6px 12px;font-size:14px';
-    say(`<b>완료!</b> ${teams.length}팀 · ${cur}개 주차 · 선수 ${Object.keys(players).length}명<br><br>` +
-      (errors.length ? `<span style="color:#ffb74d;font-size:12px">일부 경고: ${errors.slice(0, 3).join(' / ').replace(/</g, '&lt;')}</span><br><br>` : '') +
+    const summary = `${teams.length}팀 · ${cur}개 주차 · 선수 ${Object.keys(players).length}명`;
+    const warn = errors.length ? `<span style="color:#ffb74d;font-size:12px">일부 경고: ${errors.slice(0, 3).join(' / ').replace(/</g, '&lt;')}</span><br><br>` : '';
+    let pushError = '';
+
+    if (autoPush) {
+      say(`${summary} 읽기 완료<br>GitHub에 올리는 중…`);
+      try {
+        const headers = { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json' };
+        const curFile = await fetch(API_URL + '?ref=main', { headers, cache: 'no-store' });
+        const sha = curFile.ok ? (await curFile.json()).sha : undefined;
+        const bytes = new TextEncoder().encode(json);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        const res = await fetch(API_URL, {
+          method: 'PUT', headers,
+          body: JSON.stringify({ message: `로스터 업데이트 W${cur} (북마클릿)`, content: btoa(bin), sha, branch: 'main' }),
+        });
+        if (!res.ok) {
+          const msg = (await res.json().catch(() => ({}))).message || '';
+          throw new Error(res.status === 401 ? '토큰이 만료됐거나 잘못됐어요' : res.status === 403 || res.status === 404 ? '토큰에 이 저장소 쓰기 권한이 없어요' : `HTTP ${res.status} ${msg}`);
+        }
+        say(`<b>완료!</b> ${summary}<br>${warn}` +
+          `GitHub에 자동으로 올리고 커밋했어요 ✓<br><span style="opacity:.8;font-size:12px">1~2분 뒤 기록장에 반영돼요.</span><br><br>` +
+          `<a href="${SITE_URL}#league" target="_blank" style="color:#b388ff;font-weight:700">기록장 열기 ↗</a><br><br>` +
+          `<button id="ffm-close" style="${btn}">닫기</button>`);
+        box.querySelector('#ffm-close').onclick = () => box.remove();
+        return;
+      } catch (e) {
+        // Yahoo 가 외부 요청을 막았거나 토큰 문제 -> 수동 붙여넣기로 안내
+        pushError = `<span style="color:#ff8a80;font-size:12px">자동 올리기 실패: ${String(e.message || e).replace(/</g, '&lt;')}<br>아래 수동 방법으로 올려 주세요.</span><br><br>`;
+      }
+    }
+
+    say(`<b>완료!</b> ${summary}<br><br>` + warn + pushError +
       `<b>① </b><button id="ffm-copy" style="${btn}">📋 데이터 복사</button> <span id="ffm-copied"></span><br><br>` +
       `<b>② </b><a href="${EDIT_URL}" target="_blank" style="color:#b388ff;font-weight:700">GitHub 편집 화면 열기 ↗</a><br>` +
       `<span style="opacity:.8;font-size:12px">열린 화면의 글상자를 클릭 → <b>Ctrl+A</b> → <b>Ctrl+V</b><br>→ 오른쪽 위 초록색 <b>Commit changes…</b> → 한 번 더 <b>Commit changes</b></span><br><br>` +
