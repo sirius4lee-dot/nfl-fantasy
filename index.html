@@ -628,6 +628,20 @@ const SITE_URL = 'https://sirius4lee-dot.github.io/nfl-fantasy/';
 const notes = { map: store.get('notes', {}), token: store.get('notesToken', ''), sha: null, dirty: store.get('notesDirty', false), timer: null, busy: null, msg: '' };
 const hasNote = sid => !!notes.map[sid]?.t;
 
+// 관심 선수 ★ 도 메모와 같은 파일에 'star:{선수id}' 로 저장 (s: 별표 여부)
+function applyStars() {
+  state.myTeam = new Set(Object.entries(notes.map).filter(([k, v]) => k.startsWith('star:') && v.s).map(([k]) => k.slice(5)));
+  store.set('myTeam', [...state.myTeam]);
+}
+(function migrateStars() { // 예전에 기기에만 저장했던 별표를 옮김 (u:1 → 다른 기기의 실제 변경이 항상 우선)
+  let changed = false;
+  for (const pid of store.get('myTeam', [])) {
+    if (!notes.map['star:' + pid]) { notes.map['star:' + pid] = { s: true, u: 1 }; changed = true; }
+  }
+  if (changed) { store.set('notes', notes.map); notes.dirty = true; store.set('notesDirty', true); }
+  applyStars();
+})();
+
 function b64encode(str) {
   const bytes = new TextEncoder().encode(str);
   let bin = '';
@@ -695,6 +709,7 @@ function notesSync(push) {
       const localNewer = await notesPull();
       if (push || localNewer || notes.dirty) await notesPush();
       notesStatus('동기화됨 ✓');
+      applyStars();
       render();
     } catch (e) { notesStatus('동기화 실패: ' + e.message); }
   };
@@ -775,9 +790,13 @@ function openPlayer(pid) {
 }
 
 function toggleMine(pid) {
-  state.myTeam.has(pid) ? state.myTeam.delete(pid) : state.myTeam.add(pid);
-  store.set('myTeam', [...state.myTeam]);
+  notes.map['star:' + pid] = { s: !state.myTeam.has(pid), u: Date.now(), n: state.data?.players[pid]?.n };
+  store.set('notes', notes.map);
+  notes.dirty = true; store.set('notesDirty', true);
+  applyStars();
   render();
+  clearTimeout(notes.timer);
+  notes.timer = setTimeout(() => notesSync(true), 1500);
 }
 
 // ---------- rules ----------
