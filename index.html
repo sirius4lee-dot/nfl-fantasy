@@ -222,6 +222,7 @@ const API_STATS = (season, wk) => `https://api.sleeper.com/stats/nfl/${season}/$
 const MAX_WEEKS = 18;
 const API_SCHED = season => `https://api.sleeper.com/schedule/nfl/regular/${season}`;
 const PA_POS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+const LAST_WEEK = 17; // Yahoo 판타지 시즌 마지막 주차 (NFL 정규시즌은 18주)
 // GitHub Actions 가 Yahoo 에서 받아 저장하는 리그 데이터 (로컬 파일로 열 때는 배포본을 읽음)
 const LEAGUE_URLS = ['rosters.json', 'https://sirius4lee-dot.github.io/nfl-fantasy/rosters.json'];
 const POSITIONS = ['ALL','QB','RB','WR','TE','FLEX','K','DEF'];
@@ -523,7 +524,7 @@ function schedule() {
 function upcoming(team, n) {
   const sc = schedule(); if (!sc || !team) return [];
   const out = [];
-  for (let w = sc.firstOpen; w <= MAX_WEEKS && out.length < n; w++) {
+  for (let w = sc.firstOpen; w <= LAST_WEEK && out.length < n; w++) {
     const g = sc.byTeam[team]?.[w];
     if (g?.done) continue;
     out.push({ week: w, ...(g || { bye: true }) });
@@ -610,21 +611,23 @@ function renderPA() {
   $('#paChips').innerHTML = PA_POS.map(x => `<button data-papos="${x}" class="${x === pos ? 'on' : ''}">${x}</button>`).join('');
   const pa = pointsAgainst();
   if (!pa) { $('#grid').innerHTML = `<tr><td class="empty">‘업데이트’를 눌러 데이터를 불러오세요.</td></tr>`; return; }
-  const N = 4;
+  const sc = schedule();
+  const weeks = sc ? Array.from({ length: Math.max(0, LAST_WEEK - sc.firstOpen + 1) }, (_, i) => sc.firstOpen + i) : [];
+  const avgRank = gs => { const rs = gs.filter(g => !g.bye).map(g => paRank(g.opp, pos)).filter(Boolean); return rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 99; };
   const rows = Object.keys(pa.rank[pos]).map(team => {
-    const up = upcoming(team, N);
-    const rs = up.filter(g => !g.bye).map(g => paRank(g.opp, pos)).filter(Boolean);
-    return { team, r: pa.rank[pos][team], avg: pa.avg[pos][team], up, sos: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 99 };
-  }).sort((a, b) => state.paSort === 'sos' ? a.sos - b.sos : a.r - b.r);
-  const weeks = upcoming(rows[0]?.team, N).length ? Array.from({ length: N }, (_, i) => (schedule()?.firstOpen || 0) + i) : [];
+    const up = upcoming(team, LAST_WEEK);
+    return { team, r: pa.rank[pos][team], avg: pa.avg[pos][team], up, sos4: avgRank(up.slice(0, 4)), sosAll: avgRank(up) };
+  }).sort((a, b) => state.paSort === 'sos' ? a.sos4 - b.sos4 : state.paSort === 'sosAll' ? a.sosAll - b.sosAll : a.r - b.r);
   const sortTh = (k, label) => `<th data-pasort="${k}" class="${state.paSort === k ? 'sorted' : ''}">${label}${state.paSort === k ? ' ▲' : ''}</th>`;
+  const avgTd = v => `<td class="${rankCls(Math.round(v))}">${v < 99 ? v.toFixed(1) : '-'}</td>`;
   let html = `<thead><tr><th class="stick">팀</th>${sortTh('rank', `${pos} 허용 순위`)}<th>경기당 허용</th>` +
-    `${weeks.map(w => `<th class="l">W${w} 상대</th>`).join('')}${weeks.length ? sortTh('sos', `향후 ${N}주 평균`) : ''}</tr></thead><tbody>`;
+    (weeks.length ? sortTh('sos', '향후 4주 평균') + sortTh('sosAll', '남은 시즌 평균') : '') +
+    `${weeks.map(w => `<th class="l">W${w}</th>`).join('')}</tr></thead><tbody>`;
   for (const x of rows) {
     const byWeek = Object.fromEntries(x.up.map(g => [g.week, g]));
     html += `<tr><td class="stick"><b>${x.team}</b></td><td class="${rankCls(x.r)}">${ord(x.r)}</td><td>${fmt(x.avg)}</td>` +
-      weeks.map(w => `<td class="l opp">${byWeek[w] ? oppHtml(byWeek[w], pos) : '<span class="rk-mid">-</span>'}</td>`).join('') +
-      (weeks.length ? `<td class="${rankCls(Math.round(x.sos))}">${x.sos < 99 ? x.sos.toFixed(1) : '-'}</td>` : '') + '</tr>';
+      (weeks.length ? avgTd(x.sos4) + avgTd(x.sosAll) : '') +
+      weeks.map(w => `<td class="l opp">${byWeek[w] ? oppHtml(byWeek[w], pos) : '<span class="rk-mid">-</span>'}</td>`).join('') + '</tr>';
   }
   $('#grid').innerHTML = html + '</tbody>';
 }
@@ -902,7 +905,7 @@ function openPlayer(pid) {
     `<textarea id="memoText" placeholder="이 선수에 대한 내 판단, 기억해 둘 경기 등을 적어 두세요. 자동 저장돼요.">${esc(notes.map[pid]?.t || '')}</textarea></div>` +
     `<table><thead><tr><th>주차</th><th>상대</th><th>기록</th><th>Fan Pts</th></tr></thead><tbody>${body}` +
     `<tr class="total"><td>합계</td><td></td><td class="line">${gp}경기 · 평균 ${gp ? fmt(total / gp) : '-'}</td><td>${fmt(total)}</td></tr>` +
-    upcoming(p.t, 4).map(g => `<tr class="upcoming"><td>W${g.week}</td><td class="l opp">${oppHtml(g, p.p)}</td><td class="line">예정</td><td></td></tr>`).join('') +
+    upcoming(p.t, LAST_WEEK).map(g => `<tr class="upcoming"><td>W${g.week}</td><td class="l opp">${oppHtml(g, p.p)}</td><td class="line">예정</td><td></td></tr>`).join('') +
     `</tbody></table><p class="legend">상대 옆 순위: 그 팀이 ${p.p} 포지션에 판타지 점수를 많이 내준 순서 (1st = 가장 많이 내줌). <span class="rk-good">1–10 유리</span> · <span class="rk-mid">11–22 보통</span> · <span class="rk-bad">23–32 불리</span></p>`;
   $('#memoText').oninput = e => setNote(pid, e.target.value, p.n);
   notesStatus(notes.map[pid]?.u ? `마지막 수정 ${new Date(notes.map[pid].u).toLocaleString('ko-KR')}` : (notes.token ? '' : '이 기기에만 저장 (메모 동기화로 연결 가능)'));
