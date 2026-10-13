@@ -61,6 +61,7 @@ Yahoo 리그 페이지 ──(북마클릿, 로그인된 브라우저)──> ro
 - 대신 Yahoo에 로그인된 브라우저에서 북마클릿이 같은 사이트 페이지를 읽음:
   - `/f1/1430993` 리그 홈 → 순위표 `#standingstable`, 현재 주차, 리그 이름
   - `/f1/1430993/starters?week=N&startertab=team` → 10팀 전체의 슬롯(QB…BN/IR)과 선수 (`table#Tst-team-{팀번호}`, 선수 번호 `data-ys-playerid`)
+  - `/f1/1430993/pointsagainst?pos={QB|RB|WR|TE|K|DEF}&mode=average` → `#statTable0` 의 순위(`.rank-indicator`)·팀 이름(별칭→약어)·경기당 허용 점수
   - `/f1/1430993?matchup_week=N&module=matchups&lhst=matchups` → 그 주 매치업(`li[data-target*="matchup?week="]`의 mid1/mid2, `.Fz-lg` 점수, `.F-shade` 예상 점수). 실패 시 다른 주소 2개로 재시도.
 - 누를 때마다 **1주차부터 현재 주차까지 전부** 다시 읽음.
 - Yahoo 페이지는 **파일 다운로드를 막음** → GitHub API(`PUT contents/rosters.json`)로 직접 커밋. 토큰이 없거나 실패하면 "데이터 복사 → GitHub 편집 화면에 붙여넣기" 수동 방법을 안내.
@@ -131,6 +132,7 @@ Yahoo 리그 페이지 ──(북마클릿, 로그인된 브라우저)──> ro
 | 2026-09-30 | 다운로드 차단 → 클립보드 방식 → GitHub 토큰으로 자동 커밋 |
 | 2026-09-30 | 테스트 데이터가 진짜 데이터를 가리던 문제 수정, 선수 메모(비공개 저장소 동기화, QR), FA 빨간색 |
 | 2026-10-04 | 관심 선수 ★ 동기화, 연결 링크 복사 버튼 |
+| 2026-10-13 | 북마클릿이 Yahoo **Fantasy Points Against** 6개 포지션 순위를 직접 가져옴(rosters.json 의 `pa`) → 기록장 순위·색이 Yahoo와 동일. 없을 때만 직접 계산. 북마클릿 자동 업데이트(저장소의 새 코드로 실행) + 예전 버튼 URL로 토큰 재사용 |
 | 2026-10-13 | 상대 난이도(포지션별 허용 순위) 탭, 다음 상대 열, 선수 창 상대 순위·다가오는 경기. Yahoo 순위와 비교: 119개 중 100개 정확히 일치, 117개 같은 색 |
 
 ---

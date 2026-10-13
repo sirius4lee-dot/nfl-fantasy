@@ -15,6 +15,27 @@
   }
   const lid = m[1], base = `/f1/${lid}`;
 
+  // 자동 업데이트: 저장소의 최신 북마클릿 코드가 이 버튼보다 새로우면 그 코드로 실행 (버튼 재설치 불필요)
+  const VERSION = '2026-10-13';
+  let newerVersion = '';
+  if (autoPush && typeof __ffmNested === 'undefined') {
+    try {
+      const r = await fetch('https://api.github.com/repos/sirius4lee-dot/nfl-fantasy/contents/yahoo-sync.js?ref=main',
+        { headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' });
+      if (r.ok) {
+        const src = await r.text();
+        const v = src.match(/const VERSION = '([^']+)'/)?.[1];
+        if (v && v > VERSION) {
+          newerVersion = v;
+          try {
+            new Function('__ffmNested', src.replace("'__GH_TOKEN__'", JSON.stringify(GH_TOKEN)))(true);
+            return;
+          } catch { /* Yahoo 가 막으면 지금 버전으로 계속하고 끝에 재설치 안내 */ }
+        }
+      }
+    } catch { /* 확인 실패 시 지금 버전으로 계속 */ }
+  }
+
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;z-index:2147483647;top:16px;right:16px;background:#1a1e24;color:#fff;' +
     'padding:14px 16px;border-radius:10px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.4);max-width:340px';
@@ -110,6 +131,30 @@
       weeks[w] = { status: w < cur ? 'postevent' : started ? 'midevent' : 'preevent', matchups, lineups };
     }
 
+    // Fantasy Points Against: 포지션별로 각 NFL 팀이 내준 판타지 점수 순위 (Yahoo game log 의 상대 옆 순위)
+    const NICK = { Cardinals: 'ARI', Falcons: 'ATL', Ravens: 'BAL', Bills: 'BUF', Panthers: 'CAR', Bears: 'CHI', Bengals: 'CIN',
+      Browns: 'CLE', Cowboys: 'DAL', Broncos: 'DEN', Lions: 'DET', Packers: 'GB', Texans: 'HOU', Colts: 'IND', Jaguars: 'JAX',
+      Chiefs: 'KC', Raiders: 'LV', Chargers: 'LAC', Rams: 'LAR', Dolphins: 'MIA', Vikings: 'MIN', Patriots: 'NE', Saints: 'NO',
+      Giants: 'NYG', Jets: 'NYJ', Eagles: 'PHI', Steelers: 'PIT', '49ers': 'SF', Seahawks: 'SEA', Buccaneers: 'TB',
+      Titans: 'TEN', Commanders: 'WAS' };
+    const pa = {};
+    for (const pos of ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']) {
+      say(`상대 순위 읽는 중… (${pos})`);
+      try {
+        const doc = await get(`${base}/pointsagainst?pos=${pos}&mode=average`);
+        const ranks = {};
+        for (const tr of doc.querySelectorAll('#statTable0 tbody tr')) {
+          const name = text(tr.querySelector('a')).split(' vs ')[0];
+          const team = NICK[Object.keys(NICK).find(n => name.endsWith(n))];
+          const r = num(text(tr.querySelector('.rank-indicator')));
+          const cells = tr.querySelectorAll('td');
+          if (team && r) ranks[team] = { r, pts: num(text(cells[cells.length - 1])) };
+        }
+        if (Object.keys(ranks).length >= 30) pa[pos] = ranks;
+        else errors.push(`${pos} 상대 순위 표를 읽지 못했어요`);
+      } catch (e) { errors.push(`${pos} 상대 순위: ${e.message}`); }
+    }
+
     for (const t of teams) {
       t.roster = (weeks[cur]?.lineups[t.id]?.slots || []).map(([yid, slot]) => ({ yid, slot }));
     }
@@ -118,7 +163,7 @@
     const out = {
       source: 'yahoo-bookmarklet', updatedAt: new Date().toISOString(), errors,
       league: { id: lid, name: leagueName, season, currentWeek: cur, numTeams: teams.length },
-      players, teams, weeks,
+      players, teams, weeks, pa,
     };
     const json = JSON.stringify(out);
     // Yahoo 페이지는 파일 다운로드를 막아서, 클립보드 복사 → GitHub 편집 화면에 붙여넣기 방식을 쓴다
@@ -157,6 +202,7 @@
         }
         say(`<b>완료!</b> ${summary}<br>${warn}` +
           `GitHub에 자동으로 올리고 커밋했어요 ✓<br><span style="opacity:.8;font-size:12px">1~2분 뒤 기록장에 반영돼요.</span><br><br>` +
+          (newerVersion ? `<span style="color:#ffb74d;font-size:12px">새 버전(${newerVersion})이 있어요. <a href="${SITE_URL}bookmarklet.html" target="_blank" style="color:#b388ff">안내 페이지</a>에서 버튼을 다시 만들어 주세요.</span><br><br>` : '') +
           `<a href="${SITE_URL}#league" target="_blank" style="color:#b388ff;font-weight:700">기록장 열기 ↗</a><br><br>` +
           `<button id="ffm-close" style="${btn}">닫기</button>`);
         box.querySelector('#ffm-close').onclick = () => box.remove();
