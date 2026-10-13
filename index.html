@@ -93,6 +93,15 @@ body.noleague .lg { display: none !important; }
 th.l, td.l { text-align: left; }
 .owner { font-size: 12px; color: var(--muted); }
 .fa { color: var(--bad); font-weight: 700; }
+.rk-good { color: var(--good); font-weight: 700; }
+.rk-mid { color: var(--muted); }
+.rk-bad { color: var(--bad); font-weight: 700; }
+.opp { white-space: nowrap; }
+.opp .rk { font-size: 12px; }
+td.l.opp { text-align: left; }
+tr.upcoming td { color: var(--muted); }
+tr.upcoming td.l.opp { color: var(--text); }
+.legend { color: var(--muted); font-size: 12px; }
 .owner.me, .teamname.me { color: var(--accent); font-weight: 700; }
 td.bench { opacity: .45; }
 td.off { opacity: .2; }
@@ -138,6 +147,7 @@ td.loss { color: var(--muted); }
     <button data-tab="all" class="on">전체 선수</button>
     <button data-tab="league" class="lg">리그</button>
     <button data-tab="roster" class="lg">팀 로스터</button>
+    <button data-tab="pa">상대 난이도</button>
     <button data-tab="mine">관심 선수 ★ (<span id="myCount">0</span>)</button>
   </div>
   <div class="filters" id="playerBar">
@@ -146,6 +156,10 @@ td.loss { color: var(--muted); }
     <select id="owner" class="lg"></select>
     <input id="search" type="search" placeholder="선수 이름 검색">
     <span class="count" id="count"></span>
+  </div>
+  <div class="filters hide" id="paBar">
+    <div class="chips" id="paChips"></div>
+    <span class="legend">순위 = 그 포지션에 판타지 점수를 <b>많이 내준</b> 순서 (경기당 평균). <span class="rk-good">1–10 유리</span> · <span class="rk-mid">11–22 보통</span> · <span class="rk-bad">23–32 불리</span></span>
   </div>
   <div class="filters hide" id="leagueBar">
     <label class="inline">매치업 <select id="mWeek"></select></label>
@@ -206,6 +220,8 @@ const API_STATE = 'https://api.sleeper.app/v1/state/nfl';
 const API_STATS = (season, wk) => `https://api.sleeper.com/stats/nfl/${season}/${wk}?season_type=regular` +
   ['QB','RB','WR','TE','K','DEF'].map(p => `&position[]=${p}`).join('');
 const MAX_WEEKS = 18;
+const API_SCHED = season => `https://api.sleeper.com/schedule/nfl/regular/${season}`;
+const PA_POS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 // GitHub Actions 가 Yahoo 에서 받아 저장하는 리그 데이터 (로컬 파일로 열 때는 배포본을 읽음)
 const LEAGUE_URLS = ['rosters.json', 'https://sirius4lee-dot.github.io/nfl-fantasy/rosters.json'];
 const POSITIONS = ['ALL','QB','RB','WR','TE','FLEX','K','DEF'];
@@ -249,7 +265,7 @@ const state = {
   preset: store.get('preset', 'half'),
   rules: { ...YAHOO_DEFAULT, ...store.get('rules', {}) },
   myTeam: new Set(store.get('myTeam', [])),
-  tab: 'all', pos: 'ALL', team: '', owner: '', q: '',
+  tab: 'all', pos: 'ALL', team: '', owner: '', q: '', paPos: 'RB', paSort: 'rank',
   myLeague: store.get('myLeagueTeam', ''), rosterTeam: store.get('myLeagueTeam', ''), mWeek: null,
   sort: { key: 'total', dir: -1 },
 };
@@ -329,6 +345,7 @@ async function update() {
   setStatus(`${season} 시즌 1~${lastWeek}주차 불러오는 중…`);
   try {
     const wkList = Array.from({ length: lastWeek }, (_, i) => i + 1);
+    const schedP = getJSON(API_SCHED(season)).catch(() => null);
     const results = await Promise.all(wkList.map(async wk => {
       const rows = await getJSON(API_STATS(season, wk));
       setStatus(`${season} 시즌 불러오는 중… (${++done}/${lastWeek})`);
@@ -351,7 +368,8 @@ async function update() {
       }
       if (Object.keys(w).length) weeks[wk] = w;
     }
-    const data = { fetchedAt: Date.now(), weeks, players };
+    const sched = ((await schedP) || []).map(g => [g.week, g.home, g.away, g.status === 'complete' ? 1 : 0]);
+    const data = { fetchedAt: Date.now(), weeks, players, sched };
     const saved = store.set('cache.' + season, data);
     if (state.season !== season) return; // user switched season meanwhile
     state.data = data;
@@ -455,6 +473,71 @@ function buildOwnerOptions() {
   sel.innerHTML = opts.map(([v, l]) => `<option value="${v}" ${v === state.owner ? 'selected' : ''}>${esc(l)}</option>`).join('');
 }
 
+// ---------- 상대 난이도 (Yahoo 'game log' 의 상대 순위와 같은 방식) ----------
+// 팀별로 각 포지션 선수들에게 내준 판타지 점수(경기당 평균)를 계산해 1위(가장 많이 내줌 = 유리) ~ 32위로 순위.
+const ord = n => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
+const rankCls = r => r == null ? '' : r <= 10 ? 'rk-good' : r <= 22 ? 'rk-mid' : 'rk-bad';
+let paCache = { key: null, val: null };
+
+function pointsAgainst() {
+  const d = state.data; if (!d) return null;
+  const key = d.fetchedAt + JSON.stringify(state.rules);
+  if (paCache.key === key) return paCache.val;
+  const tot = {}, games = {};
+  for (const [w, wk] of Object.entries(d.weeks)) {
+    for (const [pid, st] of Object.entries(wk)) {
+      if (!st.gp || !st.opp) continue;
+      const pos = d.players[pid]?.p; if (!PA_POS.includes(pos)) continue;
+      (tot[pos] ||= {})[st.opp] = (tot[pos][st.opp] || 0) + calcPts(st, pos, state.rules);
+      (games[st.opp] ||= new Set()).add(w);
+    }
+  }
+  const rank = {}, avg = {};
+  for (const pos of PA_POS) {
+    rank[pos] = {}; avg[pos] = {};
+    Object.keys(games).map(team => [team, (tot[pos]?.[team] || 0) / games[team].size])
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([team, v], i) => { rank[pos][team] = i + 1; avg[pos][team] = v; });
+  }
+  paCache = { key, val: { rank, avg } };
+  return paCache.val;
+}
+const paRank = (team, pos) => pointsAgainst()?.rank[pos]?.[team] ?? null;
+
+// sched: [[주차, 홈, 원정, 완료여부]] -> 팀별 주차 경기
+let schedCache = { key: null, val: null };
+function schedule() {
+  const d = state.data; if (!d?.sched?.length) return null;
+  if (schedCache.key === d.fetchedAt) return schedCache.val;
+  const byTeam = {};
+  let firstOpen = MAX_WEEKS + 1;
+  for (const [w, home, away, done] of d.sched) {
+    (byTeam[home] ||= {})[w] = { opp: away, home: true, done };
+    (byTeam[away] ||= {})[w] = { opp: home, home: false, done };
+    if (!done) firstOpen = Math.min(firstOpen, w);
+  }
+  schedCache = { key: d.fetchedAt, val: { byTeam, firstOpen } };
+  return schedCache.val;
+}
+// 아직 안 치른 경기 n개 (바이 주차 포함)
+function upcoming(team, n) {
+  const sc = schedule(); if (!sc || !team) return [];
+  const out = [];
+  for (let w = sc.firstOpen; w <= MAX_WEEKS && out.length < n; w++) {
+    const g = sc.byTeam[team]?.[w];
+    if (g?.done) continue;
+    out.push({ week: w, ...(g || { bye: true }) });
+  }
+  return out;
+}
+function oppHtml(g, pos, withWeek) {
+  if (!g) return '';
+  const wk = withWeek ? `<span class="legend">W${g.week}</span> ` : '';
+  if (g.bye) return `${wk}<span class="rk-mid">BYE</span>`;
+  const r = paRank(g.opp, pos);
+  return `${wk}${g.home ? 'vs' : '@'} ${g.opp}${r ? ` <span class="rk ${rankCls(r)}">(${ord(r)})</span>` : ''}`;
+}
+
 // ---------- rows ----------
 function weekNums() { return state.data ? Object.keys(state.data.weeks).map(Number).sort((a, b) => a - b) : []; }
 
@@ -468,7 +551,8 @@ function buildRows() {
       if (s && s.gp) { const v = calcPts(s, p.p, r); pts[wk] = v; total += v; gp++; }
     }
     const o = leagueOn() ? owners.get(pid) || '' : '';
-    rows.push({ pid, ...p, pts, total, gp, avg: gp ? total / gp : 0, o, on: o ? teamOf(o)?.name || '' : '' });
+    const nx = upcoming(p.t, 1)[0];
+    rows.push({ pid, ...p, pts, total, gp, avg: gp ? total / gp : 0, o, on: o ? teamOf(o)?.name || '' : '', nx, nxr: nx && !nx.bye ? paRank(nx.opp, p.p) ?? 99 : 99 });
   }
   return rows;
 }
@@ -507,8 +591,9 @@ function setTab(tab) {
 function render() {
   document.body.classList.toggle('noleague', !leagueOn());
   if (!leagueOn() && (state.tab === 'league' || state.tab === 'roster')) setTab('all');
-  const t = state.tab, lgTab = t === 'league' || t === 'roster';
+  const t = state.tab, lgTab = t === 'league' || t === 'roster' || t === 'pa';
   $('#playerBar').classList.toggle('hide', lgTab);
+  $('#paBar').classList.toggle('hide', t !== 'pa');
   $('#leagueBar').classList.toggle('hide', t !== 'league');
   $('#rosterBar').classList.toggle('hide', t !== 'roster');
   $('#cards').classList.toggle('hide', t !== 'league');
@@ -516,7 +601,32 @@ function render() {
   $('#myCount').textContent = state.myTeam.size;
   if (t === 'league') return renderLeague();
   if (t === 'roster') return renderRoster();
+  if (t === 'pa') return renderPA();
   renderPlayers();
+}
+
+function renderPA() {
+  const pos = state.paPos;
+  $('#paChips').innerHTML = PA_POS.map(x => `<button data-papos="${x}" class="${x === pos ? 'on' : ''}">${x}</button>`).join('');
+  const pa = pointsAgainst();
+  if (!pa) { $('#grid').innerHTML = `<tr><td class="empty">‘업데이트’를 눌러 데이터를 불러오세요.</td></tr>`; return; }
+  const N = 4;
+  const rows = Object.keys(pa.rank[pos]).map(team => {
+    const up = upcoming(team, N);
+    const rs = up.filter(g => !g.bye).map(g => paRank(g.opp, pos)).filter(Boolean);
+    return { team, r: pa.rank[pos][team], avg: pa.avg[pos][team], up, sos: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 99 };
+  }).sort((a, b) => state.paSort === 'sos' ? a.sos - b.sos : a.r - b.r);
+  const weeks = upcoming(rows[0]?.team, N).length ? Array.from({ length: N }, (_, i) => (schedule()?.firstOpen || 0) + i) : [];
+  const sortTh = (k, label) => `<th data-pasort="${k}" class="${state.paSort === k ? 'sorted' : ''}">${label}${state.paSort === k ? ' ▲' : ''}</th>`;
+  let html = `<thead><tr><th class="stick">팀</th>${sortTh('rank', `${pos} 허용 순위`)}<th>경기당 허용</th>` +
+    `${weeks.map(w => `<th class="l">W${w} 상대</th>`).join('')}${weeks.length ? sortTh('sos', `향후 ${N}주 평균`) : ''}</tr></thead><tbody>`;
+  for (const x of rows) {
+    const byWeek = Object.fromEntries(x.up.map(g => [g.week, g]));
+    html += `<tr><td class="stick"><b>${x.team}</b></td><td class="${rankCls(x.r)}">${ord(x.r)}</td><td>${fmt(x.avg)}</td>` +
+      weeks.map(w => `<td class="l opp">${byWeek[w] ? oppHtml(byWeek[w], pos) : '<span class="rk-mid">-</span>'}</td>`).join('') +
+      (weeks.length ? `<td class="${rankCls(Math.round(x.sos))}">${x.sos < 99 ? x.sos.toFixed(1) : '-'}</td>` : '') + '</tr>';
+  }
+  $('#grid').innerHTML = html + '</tbody>';
 }
 
 function renderLeague() {
@@ -554,7 +664,7 @@ function renderRoster() {
 
   const lw = leagueWeeks();
   const lineup = w => league.weeks[w]?.lineups?.[t.id] || { starters: [], bench: [] };
-  let html = `<thead><tr><th>슬롯</th><th class="stick">선수</th><th>팀</th>${lw.map(w => `<th>W${w}</th>`).join('')}<th>선발 득점</th></tr></thead><tbody>`;
+  let html = `<thead><tr><th>슬롯</th><th class="stick">선수</th><th>팀</th><th class="l">다음 상대</th>${lw.map(w => `<th>W${w}</th>`).join('')}<th>선발 득점</th></tr></thead><tbody>`;
   for (const p of t.roster) {
     const info = state.data?.players[p.sid];
     let started = 0;
@@ -566,11 +676,11 @@ function renderRoster() {
     }).join('');
     const name = info ? `<span class="pname${hasNote(p.sid) ? ' has-note' : ''}" data-pid="${p.sid}">${esc(info.n)}</span>` : esc(p.name);
     html += `<tr><td class="owner">${esc(p.slot)}</td><td class="stick"><span class="pos">${esc(p.pos)}</span>${name}${info?.inj ? `<span class="inj">${esc(info.inj)}</span>` : ''}</td>` +
-      `<td>${esc(info?.t || p.nfl)}</td>${cells}<td class="tot">${fmt(started)}</td></tr>`;
+      `<td>${esc(info?.t || p.nfl)}</td><td class="l opp">${oppHtml(upcoming(info?.t || p.nfl, 1)[0], info?.p || p.pos, true)}</td>${cells}<td class="tot">${fmt(started)}</td></tr>`;
   }
   const calc = w => lineup(w).starters.reduce((a, sid) => a + (ptsOf(sid, w) || 0), 0);
-  html += `<tr class="total"><td></td><td class="stick">선발 합계 (계산)</td><td></td>${lw.map(w => `<td>${fmt(calc(w))}</td>`).join('')}<td></td></tr>`;
-  html += `<tr class="total"><td></td><td class="stick">Yahoo 공식 점수</td><td></td>${lw.map(w => { const r = teamWeek(w, t.id); return `<td class="${r?.win ? 'win' : ''}">${r ? fmt(r.pts) : '-'}</td>`; }).join('')}<td></td></tr>`;
+  html += `<tr class="total"><td></td><td class="stick">선발 합계 (계산)</td><td></td><td></td>${lw.map(w => `<td>${fmt(calc(w))}</td>`).join('')}<td></td></tr>`;
+  html += `<tr class="total"><td></td><td class="stick">Yahoo 공식 점수</td><td></td><td></td>${lw.map(w => { const r = teamWeek(w, t.id); return `<td class="${r?.win ? 'win' : ''}">${r ? fmt(r.pts) : '-'}</td>`; }).join('')}<td></td></tr>`;
   $('#grid').innerHTML = html + '</tbody>';
 }
 
@@ -580,10 +690,11 @@ function renderPlayers() {
   const wks = weekNums();
   const rows = sortRows(filterRows(buildRows()));
   const lg = leagueOn();
-  const cols = [['rank','#'],['n','선수'],['t','팀'], ...(lg ? [['on','소유']] : []), ...wks.map(w => ['w' + w, `W${w}`]), ['total','합계'],['avg','평균'],['gp','경기']];
+  const hasSched = !!schedule();
+  const cols = [['rank','#'],['n','선수'],['t','팀'], ...(lg ? [['on','소유']] : []), ...(hasSched ? [['nxr','다음 상대']] : []), ...wks.map(w => ['w' + w, `W${w}`]), ['total','합계'],['avg','평균'],['gp','경기']];
   const s = state.sort;
   let html = '<thead><tr>' + cols.map(([k, l], i) =>
-    `<th data-sort="${k}" class="${i === 1 ? 'stick ' : ''}${k === 'on' ? 'l ' : ''}${s.key === k ? 'sorted' : ''}">${l}${s.key === k ? (s.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('') + '</tr></thead><tbody>';
+    `<th data-sort="${k}" class="${i === 1 ? 'stick ' : ''}${k === 'on' || k === 'nxr' ? 'l ' : ''}${s.key === k ? 'sorted' : ''}">${l}${s.key === k ? (s.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('') + '</tr></thead><tbody>';
   if (!rows.length) {
     html += `<tr><td colspan="${cols.length}" class="empty">${state.tab === 'mine' ? '관심 선수가 없어요. 전체 선수 목록에서 ☆를 눌러 추가하세요.' : '조건에 맞는 선수가 없어요.'}</td></tr>`;
   }
@@ -596,6 +707,7 @@ function renderPlayers() {
       `<span class="pos">${x.p}</span><span class="pname${hasNote(x.pid) ? ' has-note' : ''}" data-pid="${x.pid}">${esc(x.n)}</span>${x.inj ? `<span class="inj">${esc(x.inj)}</span>` : ''}</td>` +
       `<td>${x.t}</td>` +
       (lg ? `<td class="l owner ${myOwn ? 'me' : ''}">${x.o ? esc(x.on) : '<span class="fa">FA</span>'}</td>` : '') +
+      (hasSched ? `<td class="l opp">${oppHtml(x.nx, x.p, true)}</td>` : '') +
       wks.map(w => {
         const v = x.pts[w];
         if (v == null) {
@@ -609,7 +721,7 @@ function renderPlayers() {
   if (state.tab === 'mine' && rows.length) {
     const sum = w => rows.reduce((a, x) => a + (x.pts[w] || 0), 0);
     const tot = rows.reduce((a, x) => a + x.total, 0);
-    html += `<tr class="total"><td></td><td class="stick">합계</td><td></td>${lg ? '<td></td>' : ''}${wks.map(w => `<td>${fmt(sum(w))}</td>`).join('')}<td>${fmt(tot)}</td><td>${wks.length ? fmt(tot / wks.length) : '-'}</td><td></td></tr>`;
+    html += `<tr class="total"><td></td><td class="stick">합계</td><td></td>${lg ? '<td></td>' : ''}${hasSched ? '<td></td>' : ''}${wks.map(w => `<td>${fmt(sum(w))}</td>`).join('')}<td>${fmt(tot)}</td><td>${wks.length ? fmt(tot / wks.length) : '-'}</td><td></td></tr>`;
   }
   table.innerHTML = html + '</tbody>';
   $('#count').textContent = `${rows.length}명`;
@@ -776,15 +888,22 @@ function openPlayer(pid) {
   let total = 0, gp = 0;
   const body = wks.map(w => {
     const s = state.data.weeks[w][pid];
-    if (!s) return `<tr><td>W${w}</td><td></td><td class="line">경기 없음 (바이 또는 결장)</td><td>-</td></tr>`;
+    if (!s) {
+      const g = schedule()?.byTeam[p.t]?.[w];
+      return `<tr><td>W${w}</td><td class="l opp">${g ? oppHtml({ week: w, ...g }, p.p) : '<span class="rk-mid">BYE</span>'}</td><td class="line">${g ? '결장' : '바이 주차'}</td><td>-</td></tr>`;
+    }
     const v = s.gp ? calcPts(s, p.p, state.rules) : null;
     if (v != null) { total += v; gp++; }
-    return `<tr><td>W${w}</td><td>${s.opp ? 'vs ' + s.opp : ''}</td><td class="line">${s.gp ? statLine(s, p.p) : '출전 기록 없음'}</td><td>${fmt(v)}</td></tr>`;
+    const g = schedule()?.byTeam[p.t]?.[w];
+    const opp = s.opp ? oppHtml({ week: w, opp: s.opp, home: g ? g.home : true }, p.p) : '';
+    return `<tr><td>W${w}</td><td class="l opp">${opp}</td><td class="line">${s.gp ? statLine(s, p.p) : '출전 기록 없음'}</td><td>${fmt(v)}</td></tr>`;
   }).join('');
   $('#pBody').innerHTML = `<div class="memo"><div class="memo-head">내 메모 <span class="memo-state" id="memoState"></span></div>` +
     `<textarea id="memoText" placeholder="이 선수에 대한 내 판단, 기억해 둘 경기 등을 적어 두세요. 자동 저장돼요.">${esc(notes.map[pid]?.t || '')}</textarea></div>` +
     `<table><thead><tr><th>주차</th><th>상대</th><th>기록</th><th>Fan Pts</th></tr></thead><tbody>${body}` +
-    `<tr class="total"><td>합계</td><td></td><td class="line">${gp}경기 · 평균 ${gp ? fmt(total / gp) : '-'}</td><td>${fmt(total)}</td></tr></tbody></table>`;
+    `<tr class="total"><td>합계</td><td></td><td class="line">${gp}경기 · 평균 ${gp ? fmt(total / gp) : '-'}</td><td>${fmt(total)}</td></tr>` +
+    upcoming(p.t, 4).map(g => `<tr class="upcoming"><td>W${g.week}</td><td class="l opp">${oppHtml(g, p.p)}</td><td class="line">예정</td><td></td></tr>`).join('') +
+    `</tbody></table><p class="legend">상대 옆 순위: 그 팀이 ${p.p} 포지션에 판타지 점수를 많이 내준 순서 (1st = 가장 많이 내줌). <span class="rk-good">1–10 유리</span> · <span class="rk-mid">11–22 보통</span> · <span class="rk-bad">23–32 불리</span></p>`;
   $('#memoText').oninput = e => setNote(pid, e.target.value, p.n);
   notesStatus(notes.map[pid]?.u ? `마지막 수정 ${new Date(notes.map[pid].u).toLocaleString('ko-KR')}` : (notes.token ? '' : '이 기기에만 저장 (메모 동기화로 연결 가능)'));
   $('#dlgPlayer').showModal();
@@ -841,7 +960,7 @@ function selectSeason(season) {
   if (state.data) {
     setStatus(`${season} 시즌 저장된 데이터 (${new Date(state.data.fetchedAt).toLocaleString('ko-KR')} 기준) · 최신 점수는 ‘업데이트’를 누르세요.`);
     // current season: refresh automatically if cache is older than 1 hour
-    if (season === state.currentSeason && Date.now() - state.data.fetchedAt > 3600e3) update();
+    if (season === state.currentSeason && (Date.now() - state.data.fetchedAt > 3600e3 || !state.data.sched)) update();
   } else update();
 }
 
@@ -859,6 +978,7 @@ function bind() {
     try { history.replaceState(null, '', '#' + state.tab); } catch { /* file:// 등 */ }
   });
   $('#owner').addEventListener('change', e => { state.owner = e.target.value; render(); });
+  $('#paChips').addEventListener('click', e => { const b = e.target.closest('[data-papos]'); if (b) { state.paPos = b.dataset.papos; render(); } });
   $('#mWeek').addEventListener('change', e => { state.mWeek = +e.target.value; render(); });
   $('#rosterTeam').addEventListener('change', e => { state.rosterTeam = e.target.value; render(); });
   $('#setMine').addEventListener('click', () => {
@@ -910,10 +1030,12 @@ function bind() {
     render();
   });
   $('#grid').addEventListener('click', e => {
+    const pth = e.target.closest('th[data-pasort]');
+    if (pth) { state.paSort = pth.dataset.pasort; render(); return; }
     const th = e.target.closest('th[data-sort]');
     if (th) {
       const k = th.dataset.sort; if (k === 'rank') return;
-      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['n','t','on'].includes(k) ? 1 : -1 };
+      state.sort = state.sort.key === k ? { key: k, dir: -state.sort.dir } : { key: k, dir: ['n','t','on','nxr'].includes(k) ? 1 : -1 };
       render(); return;
     }
     const star = e.target.closest('[data-star]');
@@ -946,7 +1068,7 @@ async function init() {
   const season = seasons.includes(saved) ? saved : state.currentSeason;
   $('#season').value = season;
   const hashTab = location.hash.slice(1);
-  if (['all', 'league', 'roster', 'mine'].includes(hashTab)) setTab(hashTab);
+  if (['all', 'league', 'roster', 'pa', 'mine'].includes(hashTab)) setTab(hashTab);
   selectSeason(season);
 }
 
