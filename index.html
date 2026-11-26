@@ -41,7 +41,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; color: var(-
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chips button { padding: 4px 10px; border-radius: 999px; font-size: 13px; }
-.chips button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#hideInj { padding: 4px 10px; border-radius: 999px; font-size: 13px; }
+.chips button.on, #hideInj.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 #search { min-width: 180px; flex: 1 1 180px; max-width: 280px; }
 .count { color: var(--muted); font-size: 12px; margin-left: auto; }
 .tablewrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
@@ -155,6 +156,7 @@ td.loss { color: var(--muted); }
     <select id="team"><option value="">전체 팀</option></select>
     <select id="owner" class="lg"></select>
     <input id="search" type="search" placeholder="선수 이름 검색">
+    <button id="hideInj" title="Out·IR·Doubtful 등 결장 선수를 숨기고 정상·Questionable 선수만 보기">결장 제외</button>
     <span class="count" id="count"></span>
   </div>
   <div class="filters hide" id="paBar">
@@ -269,7 +271,9 @@ const state = {
   tab: 'all', pos: 'ALL', team: '', owner: '', q: '', paPos: 'RB', paSort: 'rank',
   myLeague: store.get('myLeagueTeam', ''), rosterTeam: store.get('myLeagueTeam', ''), mWeek: null,
   sort: { key: 'total', dir: -1 },
+  hideInj: store.get('hideInj', false), // 결장 제외: 정상·Questionable 만 보기
 };
+const OK_INJ = new Set(['Questionable', 'Probable']);
 
 // ---------- scoring ----------
 function calcPts(s, pos, r) {
@@ -569,6 +573,7 @@ function filterRows(rows) {
     if (state.pos === 'FLEX' ? !['RB','WR','TE'].includes(x.p) : state.pos !== 'ALL' && x.p !== state.pos) return false;
     if (state.team && x.t !== state.team) return false;
     if (state.owner && (state.owner === 'FA' ? x.o : x.o !== (state.owner === 'ME' ? state.myLeague : state.owner))) return false;
+    if (state.hideInj && x.inj && !OK_INJ.has(x.inj)) return false;
     if (q && !x.n.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -986,6 +991,11 @@ function bind() {
     try { history.replaceState(null, '', '#' + state.tab); } catch { /* file:// 등 */ }
   });
   $('#owner').addEventListener('change', e => { state.owner = e.target.value; render(); });
+  $('#hideInj').classList.toggle('on', state.hideInj);
+  $('#hideInj').addEventListener('click', e => {
+    state.hideInj = !state.hideInj; store.set('hideInj', state.hideInj);
+    e.currentTarget.classList.toggle('on', state.hideInj); render();
+  });
   $('#paChips').addEventListener('click', e => { const b = e.target.closest('[data-papos]'); if (b) { state.paPos = b.dataset.papos; render(); } });
   $('#mWeek').addEventListener('change', e => { state.mWeek = +e.target.value; render(); });
   $('#rosterTeam').addEventListener('change', e => { state.rosterTeam = e.target.value; render(); });
